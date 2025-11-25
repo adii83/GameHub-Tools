@@ -1,0 +1,16 @@
+{
+  "action": "action",
+  "action rpg": "rpg",
+  "action-rpg": "rpg",
+  "action-adventure": "action-adventure",
+  "action adventure": "action-adventure",
+  "adventure": "adventure",
+  "casual": "casual",
+  "indie": "indie",
+  "simulation": "simulation",
+  "strategy": "strategy",
+  "rpg": "rpg",
+  "sports": "sports",
+  "racing": "racing",
+  "software": "software"
+}

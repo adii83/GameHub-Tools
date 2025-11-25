@@ -1,0 +1,46 @@
+<div class="bg-[#151515] p-4 rounded-2xl border border-white/10 shadow-xl flex flex-col gap-6">
+
+  <!-- GAME TYPE -->
+  <div>
+    <h3 class="text-lg font-semibold mb-3">Game Type</h3>
+    <div class="flex flex-col gap-2 text-sm ml-1">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" id="chk-standard" onclick="exclusiveToggle('chk-standard','chk-premium', this)" onchange="applyFilters()" class="accent-blue-500">
+        <span>Standard</span>
+      </label>
+
+      <label class="flex items-center gap-2">
+        <input type="checkbox" id="chk-premium" onclick="exclusiveToggle('chk-standard','chk-premium', this)" onchange="applyFilters()" class="accent-blue-500">
+        <span>Premium</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- DRM -->
+  <div>
+    <h3 class="text-lg font-semibold mb-3">DRM</h3>
+    <div class="flex flex-col gap-2 text-sm ml-1">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" id="chk-denuvo" onclick="exclusiveToggle('chk-denuvo','chk-non-denuvo', this)" onchange="applyFilters()" class="accent-yellow-500">
+        <span>Denuvo</span>
+      </label>
+
+      <label class="flex items-center gap-2">
+        <input type="checkbox" id="chk-non-denuvo" onclick="exclusiveToggle('chk-denuvo','chk-non-denuvo', this)" onchange="applyFilters()" class="accent-yellow-500">
+        <span>Non-Denuvo</span>
+      </label>
+    </div>
+  </div>
+
+  <!-- GENRES -->
+  <div>
+    <h3 class="text-lg font-semibold mb-3">Genres</h3>
+    <div id="genreList" class="flex flex-col gap-2 text-sm max-h-72 overflow-y-auto ml-1"></div>
+  </div>
+
+  <button onclick="resetFilters()"
+    class="mt-2 px-3 py-2 rounded-md bg-white/5 hover:bg-white/10 border border-white/5 text-sm transition">
+    Reset Filters
+  </button>
+
+</div>

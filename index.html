@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>GameHub</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+  /* shimmer skeleton */
+  @keyframes shimmer {
+    0% { background-position: -600px 0; }
+    100% { background-position: 600px 0; }
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #1a1a1a 25%, #242424 37%, #1a1a1a 63%);
+    background-size: 1200px 100%;
+    animation: shimmer 1.2s infinite;
+  }
+
+  /* slide panel */
+  .panel-hidden { transform: translateX(110%); opacity: 0; pointer-events: none; }
+  .panel-shown  { transform: translateX(0%); opacity: 1; pointer-events: auto; }
+
+  /* small card entrance */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .fade-up { animation: fadeUp .22s ease-out; }
+
+  /* gallery thumbnail selected style and nav buttons */
+  .gallery-thumb.selected {
+    transform: scale(1.08);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+    border-radius: 8px;
+    outline: 2px solid rgba(16,185,129,0.15);
+  }
+  .gallery-nav-btn {
+    /* darker translucent background similar to previous design */
+    background: rgba(2,6,23,0.55); /* deep blue/black translucent */
+    color: white;
+    border: 1px solid rgba(255,255,255,0.04);
+    box-shadow: 0 8px 22px rgba(2,6,23,0.6);
+    opacity: 0.98;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .gallery-nav-btn:hover { background: rgba(2,6,23,0.66); }
+  .gallery-nav-btn svg { display: block; }
+</style>
+
+<script defer src="js/api.js"></script>
+<script defer src="js/render.js"></script>
+<script defer src="js/filter.js"></script>
+<script defer src="js/ui.js"></script>
+<script defer src="js/router.js"></script>
+</head>
+
+<body class="bg-[#0f0f0f] text-white">
+  <div class="flex">
+    <!-- SIDEBAR -->
+    <div id="sidebar-container"></div>
+
+    <!-- MAIN CONTENT -->
+    <div id="app-content" class="flex-1 p-6 overflow-y-auto h-screen"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,68 @@
+[
+  {
+    "id": "indie",
+    "name": "Indie",
+    "icon": "🌱",
+    "color": "#4CAF50"
+  },
+  {
+    "id": "action",
+    "name": "Action",
+    "icon": "💥",
+    "color": "#FF5252"
+  },
+  {
+    "id": "casual",
+    "name": "Casual",
+    "icon": "😊",
+    "color": "#FFC107"
+  },
+  {
+    "id": "adventure",
+    "name": "Adventure",
+    "icon": "📘",
+    "color": "#42A5F5"
+  },
+  {
+    "id": "simulation",
+    "name": "Simulation",
+    "icon": "🖥️",
+    "color": "#29B6F6"
+  },
+  {
+    "id": "rpg",
+    "name": "RPG",
+    "icon": "🎲",
+    "color": "#66BB6A"
+  },
+  {
+    "id": "strategy",
+    "name": "Strategy",
+    "icon": "💡",
+    "color": "#D81B60"
+  },
+  {
+    "id": "action-adventure",
+    "name": "Action-Adventure",
+    "icon": "🌄",
+    "color": "#F57C00"
+  },
+  {
+    "id": "sports",
+    "name": "Sports",
+    "icon": "🏅",
+    "color": "#8D6E63"
+  },
+  {
+    "id": "racing",
+    "name": "Racing",
+    "icon": "🏁",
+    "color": "#9CCC65"
+  },
+  {
+    "id": "software",
+    "name": "Software",
+    "icon": "💾",
+    "color": "#5C6BC0"
+  }
+]

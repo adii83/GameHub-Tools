@@ -1,0 +1,59 @@
+# Node modules
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+out/
+.cache/
+.parcel-cache/
+.vite/
+
+# Env files
+.env
+.env.*.local
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.iml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Proxy / local dev artifacts
+proxy/node_modules/
+proxy/*.log
+proxy/.cache
+
+# Misc
+*.localstorage
+*.db
+$RECYCLE.BIN/
+
+# Optional lockfiles you may want to include/exclude depending on policy
+# package-lock.json
+# yarn.lock
