@@ -1,3 +1,27 @@
+// Normalize a string for fuzzy matching: lowercase, strip symbols/punctuation,
+// remove diacritics, collapse whitespace, and normalize apostrophes.
+function normalizeFuzzy(s) {
+  try {
+    if (!s) return '';
+    let t = String(s).toLowerCase();
+    // Normalize Unicode (remove diacritics)
+    t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Replace various apostrophes and quotes with plain space
+    t = t.replace(/[’'`´]/g, ' ');
+    // Remove trademark/special symbols and general punctuation
+    t = t.replace(/[®™©•··]/g, ' ');
+    t = t.replace(/[^a-z0-9]+/g, ' ');
+    // Collapse spaces
+    t = t.replace(/\s+/g, ' ').trim();
+    return t;
+  } catch (e) { return ''; }
+}
+function tokenizeAndStemLocal(s) {
+  const tokens = (s || '').split(' ').filter(Boolean);
+  const stem = (w) => (w.endsWith('s') ? w.slice(0, -1) : w);
+  return tokens.map(stem);
+}
+
 function applyFilters(render = true) {
   // Do not clear page cache on filter change; we avoid triggering rebuilds
   // so filtering operates only on already-fetched data.
@@ -10,11 +34,8 @@ function applyFilters(render = true) {
   const genreChecks = [...document.querySelectorAll(".genreCheck:checked")].map(
     (x) => x.value.toLowerCase()
   );
-  const search =
-    document.getElementById("searchInput")?.value?.toLowerCase() || "";
-  // normalize search token: remove non-alphanumeric and collapse spaces
-  const normalize = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const searchNorm = normalize(search);
+  const search = document.getElementById("searchInput")?.value || "";
+  const searchNorm = normalizeFuzzy(search);
 
   // Determine if any filters/search are active so render can avoid building
   // Also expose whether the active filters should force filling pages
@@ -27,14 +48,19 @@ function applyFilters(render = true) {
   filteredData = originalData.filter((game) => {
     const isPremium = game.price_initial >= PREMIUM_MIN;
 
-    // Search: match normalized title or appid when numeric
+    // Search: fuzzy match normalized title or exact appid when numeric
     if (searchNorm) {
-      const titleNorm = normalize(game.title || '');
-      const numericSearch = /^\d+$/.test(search);
+      const titleNorm = normalizeFuzzy(game.title || '');
+      const numericSearch = /^\d+$/.test(search.trim());
       if (numericSearch) {
-        if (String(game.appid) !== search) return false;
+        if (String(game.appid) !== search.trim()) return false;
       } else {
-        if (!titleNorm.includes(searchNorm)) return false;
+        // token+stem match
+        const qTokens = tokenizeAndStemLocal(searchNorm);
+        const nTokens = tokenizeAndStemLocal(titleNorm);
+        const set = new Set(nTokens);
+        const allMatch = qTokens.every(t => set.has(t));
+        if (!allMatch) return false;
       }
     }
 
@@ -63,7 +89,19 @@ function applyFilters(render = true) {
     return true;
   });
 
-  if (render) renderPage(1);
+  if (render) {
+    renderPage(1);
+    // Friendly empty state if no results
+    try {
+      const list = document.getElementById('game-list');
+      if (list && filteredData.length === 0) {
+        list.innerHTML = `
+          <div class="text-center text-sm text-gray-400 py-10 border border-white/5 rounded-xl bg-[#151515]">
+            Tidak ada game yang cocok dengan pencarian atau filter.
+          </div>`;
+      }
+    } catch (e) {}
+  }
 }
 
 // Called when user presses Enter in the search box
@@ -80,167 +118,44 @@ function onSearchKeyDown(e) {
 // triggers building for the current page. Shows blocking overlay while fetching/building.
 async function performRemoteSearch() {
   try {
-    const q = document.getElementById('searchInput')?.value?.trim();
+    const qRaw = document.getElementById('searchInput')?.value || '';
+    const q = normalizeFuzzy(qRaw);
     if (!q) return;
-    // If the user typed numeric appid(s) (e.g. "216150" or "216150, 440"), treat as direct appid lookup
-    const numericListMatch = q.match(/^(\d+)([,\s]+\d+)*$/);
-    if (numericListMatch) {
-      const parts = q.split(/[,\s]+/).map(s => parseInt(s,10)).filter(n => !isNaN(n));
-      if (parts.length) {
-        showBlockingOverlay('Mencari appid dan membangun detail...', { closable: true });
-        const seen = new Set(remainingAppIds.concat(originalData.map(x=>x.appid)));
-        const toQueue = [];
-        let builtCount = 0;
-        // Try to build each requested appid immediately so it appears right away
-        const buildPromises = parts.map(async (id) => {
-          try {
-            // If already present in originalData, skip building
-            if (originalData.find(g => g.appid === id)) return { id, built: false, reason: 'already_built' };
-            const g = await buildGame(id);
-            if (g) {
-              originalData.push(g);
-              try { addBuiltCache(id); } catch(e) {}
-              builtCount++;
-              return { id, built: true };
-            } else {
-              // couldn't build now, queue for later
-              return { id, built: false, reason: 'no_details' };
-            }
-          } catch (e) {
-            return { id, built: false, reason: e && e.message };
-          }
-        });
-        const results = await Promise.all(buildPromises);
-        // For any that failed to build, add to remainingAppIds if not already present
-        const existing = new Set(remainingAppIds.concat(originalData.map(x=>x.appid)));
-        for (const r of results) {
-          if (!r.built) {
-            if (!existing.has(r.id)) { toQueue.push(r.id); existing.add(r.id); }
-          }
-        }
-        if (toQueue.length) {
-          // add to front so they're built sooner
-          for (let i = toQueue.length - 1; i >= 0; i--) remainingAppIds.unshift(toQueue[i]);
-          saveRemaining();
-        }
-        // reapply filters and render so built games show immediately
-        if (typeof applyFilters === 'function') applyFilters(true);
-        hideBlockingOverlay();
-        showTransientMessage(`Mencoba ${parts.length} appid — berhasil: ${builtCount}, antrian: ${toQueue.length}`, 4000);
-        return;
-      }
-    }
-    // show blocking overlay with retry button
-    showBlockingOverlay('Mencari game secara online...', { retry: true, retryPage: currentPage, closable: true });
-    // fetch remote appids (first page)
-    // Try to get search results with metadata (title/thumb)
+    // Pencarian pada daftar data lokal (dari GitHub); buat placeholder tanpa build
+    showBlockingOverlay('Mencari game di daftar data...', { closable: true });
     let metas = [];
     try {
-      // Try GitHub raw list first
-      try {
-        metas = await searchGithub(q, PAGE_SIZE);
-        if (metas && metas.length) console.log('[GameHub] performRemoteSearch found results from GitHub raw', metas.length);
-      } catch (ghErr) {
-        metas = [];
-      }
-      // If none found in GitHub raw, fall back to Steam search parsing
-      if (!metas || metas.length === 0) {
-        try {
-          metas = await fetchSearchResults(q, 0, 50);
-        } catch (e) {
-          console.warn('[GameHub] fetchSearchResults threw', e && e.message);
-          metas = [];
-        }
-      }
-    } catch (e) {
-      console.warn('[GameHub] performRemoteSearch search error', e && e.message);
-      metas = [];
-    }
-    const ids = metas.map(m => m.appid);
-    console.log('[GameHub] performRemoteSearch got', ids?.length || 0, 'ids (from fetchSearchResults)');
-    // Create placeholder entries in originalData for immediate display (first page worth)
+      // Pass original raw query to remote search, but use fuzzy placement locally
+      metas = await searchGithub(qRaw, PAGE_SIZE);
+      if (metas && metas.length) console.log('[GameHub] performRemoteSearch (data) found', metas.length);
+    } catch (e) { console.warn('[GameHub] searchGithub error', e && e.message); metas = []; }
     try {
       if (metas && metas.length) {
         const show = metas.slice(0, PAGE_SIZE);
         const existingIds = new Set(originalData.map(x => x.appid));
-        // insert placeholders at front in original order
         for (let i = show.length - 1; i >= 0; i--) {
           const m = show[i];
           if (!existingIds.has(m.appid)) {
-            const ph = {
-              appid: m.appid,
-              title: m.title || '',
-              header: m.thumb || '',
-              header_candidates: [],
-              genre_display: '',
-              _placeholder: true
-            };
+            const ph = { appid: m.appid, title: m.title || '', header: m.thumb || '', genre_display: '', _placeholder: true, price_initial: 0, price_normalized: 0, protection: false };
             originalData.unshift(ph);
             existingIds.add(m.appid);
           }
         }
-        // render page so placeholders appear immediately
         if (typeof applyFilters === 'function') applyFilters(true);
+      } else {
+        showTransientMessage('Tidak ada hasil ditemukan.', 4000);
+        // Also reflect in the list area for clarity
+        try {
+          const list = document.getElementById('game-list');
+          if (list) {
+            list.innerHTML = `
+              <div class="text-center text-sm text-gray-400 py-10 border border-white/5 rounded-xl bg-[#151515]">
+                Tidak ada game yang cocok dengan pencarian.
+              </div>`;
+          }
+        } catch (e) {}
       }
     } catch (e) { console.warn('[GameHub] create placeholders failed', e && e.message); }
-    // If remoteSearch returned nothing, attempt an HTML fallback to the regular search page
-    if ((!ids || ids.length === 0) && typeof API_PROXY !== 'undefined') {
-      try {
-        const altUrl = API_PROXY + `https://store.steampowered.com/search/?term=${encodeURIComponent(q)}&cc=US&l=en`;
-        console.log('[GameHub] performRemoteSearch trying HTML fallback', altUrl);
-        const hdrs = { 'Referer': 'https://store.steampowered.com/' };
-        try { hdrs['User-Agent'] = navigator.userAgent; } catch(e) {}
-        const r2 = await fetch(altUrl, { cache: 'no-store', headers: hdrs });
-        if (r2 && r2.ok) {
-          const txt = await r2.text();
-          const re = /\/app\/(\d+)\//g;
-          const out = new Set();
-          let m;
-          while ((m = re.exec(txt)) !== null) {
-            const id = parseInt(m[1], 10);
-            if (!isNaN(id)) out.add(id);
-          }
-          const found = [...out];
-          if (found.length) {
-            console.log('[GameHub] performRemoteSearch HTML fallback found', found.length, 'ids');
-            ids = found;
-          } else {
-            console.log('[GameHub] performRemoteSearch HTML fallback found 0 ids');
-          }
-        } else {
-          console.warn('[GameHub] performRemoteSearch HTML fallback fetch non-ok', r2 && r2.status);
-        }
-      } catch (e) {
-        console.warn('[GameHub] performRemoteSearch HTML fallback error', e && e.message);
-      }
-    }
-
-    if (ids && ids.length) {
-      // merge unique ids into remainingAppIds (avoid duplicates)
-      const seen = new Set(remainingAppIds.concat(originalData.map(x=>x.appid)));
-      const toAdd = [];
-      for (const id of ids) {
-        if (!seen.has(id)) {
-          toAdd.push(id);
-          seen.add(id);
-        }
-      }
-      // Prioritize found ids by adding them to the front of the queue in original order
-      if (toAdd.length) {
-        for (let i = toAdd.length - 1; i >= 0; i--) remainingAppIds.unshift(toAdd[i]);
-        saveRemaining();
-      }
-      console.log('[GameHub] performRemoteSearch merged', ids.length, 'found, added=', toAdd.length);
-      // ensure page builds using the existing builder and report built count
-      const before = originalData.length;
-      await ensureGamesForPage(currentPage);
-      const built = Math.max(0, originalData.length - before);
-      // reapply filters and render
-      if (typeof applyFilters === 'function') applyFilters(true);
-      showTransientMessage(`Ditemukan ${ids.length} id, ditambahkan ${toAdd.length}, dibangun ${built}`, 4000);
-    } else {
-      showTransientMessage('Pencarian tidak menemukan hasil tambahan', 4000);
-    }
   } catch (e) {
     console.warn('[GameHub] performRemoteSearch error', e && e.message);
   } finally {
@@ -288,3 +203,128 @@ function debounce(fn, wait) {
 window.debouncedApplyFilters = debounce(() => {
   try { applyFilters(true); } catch(e) {}
 }, 250);
+
+// Perbarui label "Terakhir diperbarui" secara netral dari meta cache
+function updateLastUpdatedLabel() {
+  try {
+    const el = document.getElementById('last-updated');
+    if (!el) return;
+    const metaRaw = localStorage.getItem('gamehub_github_meta');
+    let meta = {};
+    try { meta = metaRaw ? JSON.parse(metaRaw) : {}; } catch(e) { meta = {}; }
+    const ts = meta && meta.ts ? new Date(meta.ts) : null;
+    if (ts) {
+      const locale = navigator.language || 'id-ID';
+      const fmt = ts.toLocaleString(locale, { hour12: false });
+      el.textContent = `Terakhir diperbarui: ${fmt}`;
+    } else {
+      el.textContent = 'Terakhir diperbarui: —';
+    }
+  } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  try { updateLastUpdatedLabel(); } catch (e) {}
+  // Populate genre list with full catalog
+  try { loadGenreListCatalog(); } catch (e) {}
+});
+
+// Load and render the full genre catalog into the filter panel.
+async function loadGenreListCatalog() {
+  try {
+    const container = document.getElementById('genreList');
+    if (!container) return;
+    // Fetch local catalog; if fails, derive from current data
+    let catalog = [];
+    try {
+      const res = await fetch('/data/steam_genres.json', { cache: 'no-cache' });
+      if (res.ok) catalog = await res.json();
+    } catch (e) { catalog = []; }
+    const names = new Map();
+    // seed with catalog ids -> names
+    (catalog || []).forEach(g => {
+      if (g && g.id) names.set(String(g.id).toLowerCase(), g.name || g.id);
+    });
+    // also include any genres found in data set so nothing is missed
+    try {
+      (originalData || []).forEach(game => {
+        if (!game) return;
+        let gs = [];
+        if (Array.isArray(game.genre)) gs = game.genre;
+        else if (typeof game.genre === 'string') gs = (game.genre || '').split(',');
+        gs.forEach(x => {
+          const key = String(x || '').trim().toLowerCase();
+          if (key) names.set(key, x);
+        });
+        const disp = game.genre_display || '';
+        if (disp && !names.has(String(disp).toLowerCase())) names.set(String(disp).toLowerCase(), disp);
+      });
+    } catch (e) {}
+
+    const entries = [...names.entries()].sort((a,b) => a[1].localeCompare(b[1]));
+    container.innerHTML = '';
+    for (const [val, label] of entries) {
+      container.innerHTML += `
+        <label class="flex items-center gap-2">
+          <input type="checkbox" value="${val}" class="genreCheck accent-green-500" onchange="applyFilters()">
+          <span>${label}</span>
+        </label>`;
+    }
+  } catch (e) {}
+}
+
+// Compatibility function used from render.js: populate genre list based on
+// provided data (usually originalData). If `data` is not provided we still
+// load the canonical catalog so the UI shows all genres.
+async function loadGenreList(data) {
+  try {
+    const container = document.getElementById('genreList');
+    if (!container) return;
+
+    // Try load canonical catalog first
+    let catalog = [];
+    try {
+      const res = await fetch('/data/steam_genres.json', { cache: 'no-cache' });
+      if (res.ok) catalog = await res.json();
+    } catch (e) { catalog = []; }
+
+    const names = new Map();
+    // prefer canonical ordering from catalog
+    (catalog || []).forEach(g => {
+      const id = String(g.id || g.name || '').trim().toLowerCase();
+      if (id) names.set(id, g.name || g.id);
+    });
+
+    // Also include genres found in the provided data so nothing is missed
+    try {
+      const src = Array.isArray(data) && data.length ? data : (Array.isArray(originalData) ? originalData : []);
+      src.forEach(game => {
+        if (!game) return;
+        // game.genre can be array or comma-separated string
+        let gs = [];
+        if (Array.isArray(game.genre)) gs = game.genre;
+        else if (typeof game.genre === 'string' && game.genre.trim()) gs = game.genre.split(',');
+        gs.forEach(x => {
+          const key = String(x || '').trim().toLowerCase();
+          const label = String(x || '').trim();
+          if (key && !names.has(key)) names.set(key, label || key);
+        });
+        // also add genre_display
+        const disp = game.genre_display || '';
+        if (disp) {
+          const key = String(disp).trim().toLowerCase();
+          if (key && !names.has(key)) names.set(key, disp);
+        }
+      });
+    } catch (e) {}
+
+    // Render checkboxes preserving any previously checked values
+    const prevChecked = new Set([...document.querySelectorAll('.genreCheck:checked')].map(x => String(x.value)));
+    const entries = [...names.entries()].sort((a,b) => a[1].localeCompare(b[1]));
+    container.innerHTML = '';
+    for (const [val, label] of entries) {
+      const checked = prevChecked.has(val) ? 'checked' : '';
+      container.innerHTML += `\n        <label class="flex items-center gap-2">\n          <input type="checkbox" value="${val}" class="genreCheck accent-green-500" onchange="applyFilters()" ${checked}>\n          <span>${label}</span>\n        </label>`;
+    }
+  } catch (e) {}
+}

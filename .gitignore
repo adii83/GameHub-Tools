@@ -44,10 +44,7 @@ temp/
 coverage/
 .nyc_output/
 
-# Proxy / local dev artifacts
-proxy/node_modules/
-proxy/*.log
-proxy/.cache
+# (proxy removed)
 
 # Misc
 *.localstorage

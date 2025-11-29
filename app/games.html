@@ -2,19 +2,21 @@
   <h1 class="text-3xl font-bold">Games</h1>
 
   <div class="flex items-center gap-2">
+    <span class="text-xs text-gray-400 hidden sm:inline mr-2">
+      Tips: cari akurat pakai <span class="text-white/80">AppID</span> dari
+      <a href="https://steamdb.info/" target="_blank" rel="noopener noreferrer" class="underline text-blue-400 hover:text-blue-300">SteamDB</a>
+    </span>
+
     <input id="searchInput" oninput="debouncedApplyFilters()" onkeydown="onSearchKeyDown(event)"
       class="px-3 py-2 rounded-md bg-[#151515] border border-white/5 text-sm w-64"
-      placeholder="Search games... (Enter to search online)" />
+      placeholder="Search Games" />
 
     <button onclick="performRemoteSearch()"
       class="px-3 py-2 rounded-md bg-purple-600 hover:bg-purple-700 border border-white/5 text-sm transition text-white">
       Cari
     </button>
 
-    <button onclick="refreshGithubRaw()"
-      class="px-3 py-2 rounded-md bg-gray-700 hover:bg-gray-600 border border-white/5 text-sm transition text-white">
-      Refresh Raw
-    </button>
+    
     <button onclick="toggleFilterPanel()"
       class="px-3 py-2 rounded-md bg-white/5 hover:bg-white/10 border border-white/5 text-sm transition">
       Filters
@@ -24,7 +26,7 @@
 
 <div class="relative flex gap-6">
   <!-- LIST -->
-  <div class="flex-1">
+  <div class="flex-1 premium-scroll">
     <div id="game-list" class="flex flex-col gap-4"></div>
 
     <!-- PAGINATION -->
@@ -38,11 +40,11 @@
   </div>
 </div>
 
-<!-- DETAIL DRAWER (slide-over right) -->
+<!-- DETAIL MODAL (centered pop-up) -->
 <div id="detail-drawer" class="fixed inset-0 z-50 hidden">
   <div id="drawer-overlay" class="absolute inset-0 bg-black/60"></div>
-  <div id="detail-drawer-panel" class="absolute right-0 top-0 h-full w-[48rem] max-w-[95vw] bg-[#151515] border border-white/10 rounded-l-2xl shadow-2xl p-5 transform transition-transform duration-300 panel-hidden">
-    <div id="detail-card" class="h-full overflow-auto">
+  <div id="detail-drawer-panel" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[48rem] max-w-[96vw] max-h-[88vh] bg-[#151515] border border-white/10 rounded-2xl shadow-2xl p-6 opacity-0 scale-95 transition-all duration-200">
+    <div id="detail-card" class="h-full overflow-auto premium-scroll">
       <!-- content injected -->
     </div>
   </div>

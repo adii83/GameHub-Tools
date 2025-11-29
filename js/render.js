@@ -1,10 +1,8 @@
 let originalData = [];
 let filteredData = [];
 let currentPage = 1;
-let remainingAppIds = [];
+// Raw-only: tidak ada antrian appid atau proses build incremental
 let buildingInProgress = false;
-let maybeHasMore = true; // true if sampling from full app list may yield more ids
-let searchCursor = 0; // offset for store search scraping
 // Cache built pages so navigation back/forward shows the same items
 const pageCache = {}; // pageNumber -> array of game objects
 // Persisted page cache key and limits
@@ -38,6 +36,17 @@ function prunePageCache() {
   } catch (e) {}
 }
 
+  // Auto-load user's provided raw GitHub URL (once) — set by user in this session
+  try {
+    const provided = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/refs/heads/main/steam_data.json';
+    const existing = localStorage.getItem('gamehub_manual_raw');
+    if (!existing || String(existing).trim() !== provided) {
+      console.log('[GameHub] auto-loading provided raw game list');
+      // Use the public helper which persists the URL
+      try { if (window && typeof window.useRawGameList === 'function') window.useRawGameList(provided); else { localStorage.setItem('gamehub_manual_raw', provided); window.GAMEHUB_RAW_URL = provided; } } catch (e) { localStorage.setItem('gamehub_manual_raw', provided); window.GAMEHUB_RAW_URL = provided; }
+    }
+  } catch (e) {}
+
 function savePageCache() {
   try {
     prunePageCache();
@@ -47,113 +56,18 @@ function savePageCache() {
   }
 }
 // Configuration / storage keys
-const BUILD_CONCURRENCY = 3;
+// Raw-only: nonaktifkan builder dan storage terkait
+const BUILD_CONCURRENCY = 0;
 const REMAINING_KEY = 'gamehub_remaining_appids';
 const BUILD_CACHE_KEY = 'gamehub_built_appids';
-// Rate control
-const INTER_REQUEST_DELAY_MS = 350; // delay between individual builds
-const BACKOFF_BASE_MS = 1000; // base backoff multiplier when rate-limited
-const RATE_LIMIT_THRESHOLD = 5; // consecutive rate-limited responses before pausing
 
-function saveRemaining() {
-  try { localStorage.setItem(REMAINING_KEY, JSON.stringify(remainingAppIds)); } catch(e) {}
-}
+function saveRemaining() { /* raw-only: tidak digunakan */ }
 
-// Small visual indicator shown while scraping/fetching additional appids
-function showScrapeIndicator() {
-  try {
-    if (!document) return;
-    if (!document.getElementById('gamehub-spinner-style')) {
-      const s = document.createElement('style');
-      s.id = 'gamehub-spinner-style';
-      s.innerHTML = `@keyframes gamehub-spin{to{transform:rotate(360deg)}}`;
-      document.head.appendChild(s);
-    }
-    let el = document.getElementById('scrape-indicator');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'scrape-indicator';
-      el.style.cssText = 'position:fixed;right:16px;bottom:72px;background:rgba(17,17,17,0.95);padding:8px 12px;border-radius:10px;color:#fff;display:flex;align-items:center;gap:8px;z-index:9999;box-shadow:0 6px 24px rgba(0,0,0,0.6);font-size:12px';
-      el.innerHTML = `<div style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.12);border-top-color:#9b5cff;border-radius:50%;animation:gamehub-spin 1s linear infinite"></div><div>Mengumpulkan data…</div>`;
-      document.body.appendChild(el);
-    }
-    el.style.display = 'flex';
-  } catch (e) {}
-}
+// Raw-only: indikator scrape dihapus
 
-// Proxy banner UI: shown when local API proxy is unavailable
-function showProxyBanner() {
-  try {
-    let el = document.getElementById('gamehub-proxy-banner');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'gamehub-proxy-banner';
-      el.style.cssText = 'position:fixed;left:16px;bottom:16px;background:#b91c1c;color:#fff;padding:10px 14px;border-radius:10px;z-index:12000;box-shadow:0 8px 30px rgba(0,0,0,0.6);font-size:13px;max-width:420px;line-height:1.3';
-      el.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div><strong>Proxy offline</strong> — pengambilan detail ditunda.</div>
-          <div style="font-size:12px;opacity:0.95">Untuk mengembalikan detail (harga, header, DRM), jalankan proxy lokal dari folder proyek:</div>
-          <code style="background:#111;padding:6px;border-radius:6px;font-size:12px;color:#fff;display:inline-block">npm run proxy</code>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <button id="gamehub-proxy-copy" style="padding:6px 10px;border-radius:6px;background:#111;border:1px solid rgba(255,255,255,0.06);color:#fff;">Salin perintah</button>
-            <button id="gamehub-proxy-retry" style="padding:6px 10px;border-radius:6px;background:#0f172a;border:1px solid rgba(255,255,255,0.06);color:#fff;">Coba Sambungkan</button>
-            <button id="gamehub-proxy-dismiss" style="padding:6px 10px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.12);color:#fff;">Tutup</button>
-          </div>
-        </div>`;
-      document.body.appendChild(el);
-      document.getElementById('gamehub-proxy-copy').onclick = async () => {
-        try {
-          await navigator.clipboard.writeText('npm run proxy');
-          showTransientMessage('Perintah disalin ke clipboard', 3000);
-        } catch (e) { showTransientMessage('Gagal menyalin', 3000); }
-      };
-      document.getElementById('gamehub-proxy-retry').onclick = async () => {
-        try {
-          showBlockingOverlay('Mencoba menyambung ke proxy...');
-          // Force a refresh of the GitHub raw (this will ping network and indirectly check proxy)
-          try { await fetchGithubAppList(true); } catch (e) {}
-          // also attempt to trigger any onProxyUp hook
-          try { if (window && typeof window.onProxyUp === 'function') window.onProxyUp(); } catch (e) {}
-        } catch (e) {}
-        hideBlockingOverlay();
-      };
-      document.getElementById('gamehub-proxy-dismiss').onclick = () => { hideProxyBanner(); };
-    }
-    el.style.display = 'block';
-  } catch (e) {}
-}
+// Raw-only: remove proxy banner and handlers
 
-function hideProxyBanner() {
-  try {
-    const el = document.getElementById('gamehub-proxy-banner');
-    if (el) el.style.display = 'none';
-  } catch (e) {}
-}
-
-// When proxy comes back, resume background building if paused
-try {
-  window.onProxyUp = async function() {
-    try {
-      hideProxyBanner();
-      showTransientMessage('Proxy tersedia — melanjutkan pengambilan detail...', 3000);
-      // If not currently building, kick off ensureGamesForPage for current page
-      try {
-        if (typeof ensureGamesForPage === 'function' && !buildingInProgress) {
-          await ensureGamesForPage(currentPage || 1);
-          // re-render current page to replace placeholders
-          try { renderPage(currentPage || 1); } catch (e) {}
-        }
-      } catch (e) { console.warn('[GameHub] resume after proxy up failed', e && e.message); }
-    } catch (e) {}
-  };
-} catch (e) {}
-
-function hideScrapeIndicator() {
-  try {
-    const el = document.getElementById('scrape-indicator');
-    if (el) el.style.display = 'none';
-  } catch (e) {}
-}
+// Raw-only: indikator scrape dihapus
 
 // Blocking centered overlay for explicit waits (e.g., user clicked Next and page
 // must be filled). Can be closable or show a final message.
@@ -198,7 +112,7 @@ function showBlockingOverlay(message, options = {}) {
       if (document.getElementById('gamehub-block-dismiss')) document.getElementById('gamehub-block-dismiss').style.display = 'none';
     }
 
-    // If retry option provided, show a 'Coba Lagi' button that triggers a retry of ensureGamesForPage
+    // If retry option provided, show a 'Coba Lagi' button (raw-only: no builder)
     if (options.retry) {
       if (!document.getElementById('gamehub-block-retry')) {
         const r = document.createElement('button');
@@ -209,10 +123,8 @@ function showBlockingOverlay(message, options = {}) {
           try {
             // Use provided retryPage or the global currentPage
             const pageToRetry = options.retryPage || window.currentPage || 1;
-            showBlockingOverlay('Mengumpulkan data lagi...');
-            await ensureGamesForPage(pageToRetry);
+            showBlockingOverlay('Memuat ulang halaman...');
             hideBlockingOverlay();
-            // re-render the page after retry
             try { renderPage(pageToRetry); } catch(e) {}
           } catch (e) {
             hideBlockingOverlay();
@@ -266,6 +178,97 @@ function getBuiltCache() {
   } catch (e) { return new Set(); }
 }
 
+// Normalize games array and prepare originalData + pageCache
+function normalizeAndPrepareGames(arr, shuffle = true) {
+  try {
+    if (!Array.isArray(arr)) return [];
+    // normalize entries
+    const out = arr.map((g) => {
+      const copy = Object.assign({}, g);
+      copy.appid = Number(copy.appid || copy.id || 0);
+      copy.title = String(copy.title || copy.name || '');
+      // normalize header candidates
+        // header_candidates no longer used; ensure header exists only
+      // normalize price
+      copy.price_normalized = Number(copy.price_normalized ?? copy.price_initial ?? 0) || 0;
+      // keep price_initial for compatibility with other modules
+      copy.price_initial = Number(copy.price_initial ?? copy.price_normalized) || copy.price_normalized;
+      // protection: per user, true => denuvo, null => non-denuvo
+      copy.protection = (copy.protection === true) ? true : false;
+      // tier based on price threshold 350000
+      copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
+      return copy;
+    });
+
+    // shuffle once for randomized presentation but keep pages stable afterwards
+    if (shuffle) {
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+    }
+
+    // assign to originalData and filteredData
+    originalData = out.slice();
+    filteredData = originalData;
+
+    // prefill pageCache for stable paging (PAGE_SIZE per page)
+    try {
+      Object.keys(pageCache).forEach(k => delete pageCache[k]);
+      const totalPages = Math.ceil(originalData.length / PAGE_SIZE) || 0;
+      for (let p = 1; p <= totalPages; p++) {
+        const start = (p - 1) * PAGE_SIZE;
+        pageCache[p] = originalData.slice(start, start + PAGE_SIZE);
+      }
+      savePageCache();
+    } catch (e) {}
+
+    loadGenreList(originalData);
+    return out;
+  } catch (e) { console.warn('[GameHub] normalizeAndPrepareGames error', e && e.message); return []; }
+}
+
+// Load remote canonical JSON (GitHub raw or other raw URL) and prepare dataset
+async function loadRemoteGameList(url) {
+  try {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('failed to fetch remote game list: ' + res.status);
+    const raw = await res.json();
+    // raw may be object keyed by appid or array
+    const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+    const prepared = normalizeAndPrepareGames(arr, true);
+    // persist the manual url so future visits load the same
+    try { localStorage.setItem('gamehub_manual_raw', url); } catch (e) {}
+
+    // Render first page from cache (pageCache was prepared)
+    try { await renderPage(1); } catch (e) { console.warn('[GameHub] renderPage after loadRemoteGameList failed', e && e.message); }
+    // start protection worker if any
+    try { if (typeof startProtectionWorker === 'function') startProtectionWorker(); } catch (e) {}
+    return prepared;
+  } catch (e) { console.warn('[GameHub] loadRemoteGameList failed', e && e.message); throw e; }
+}
+
+// Expose helper for users to set raw URL at runtime
+try {
+  window.useRawGameList = async function(url) {
+    if (!url) return;
+    try {
+      localStorage.setItem('gamehub_manual_raw', url);
+    } catch (e) {}
+    // set global var too
+    try { window.GAMEHUB_RAW_URL = url; } catch (e) {}
+    await loadRemoteGameList(url);
+  };
+  window.clearRawGameList = function() {
+    try { localStorage.removeItem('gamehub_manual_raw'); } catch (e) {}
+    try { delete window.GAMEHUB_RAW_URL; } catch (e) {}
+    // clear page cache so app resumes sampling behaviour
+    try { Object.keys(pageCache).forEach(k => delete pageCache[k]); savePageCache(); } catch (e) {}
+    // reload initial flow
+    try { initGamesPage(); } catch (e) {}
+  };
+} catch (e) {}
+
 function addBuiltCache(id) {
   try {
     const s = getBuiltCache();
@@ -279,103 +282,64 @@ async function initGamesPage() {
   try { loadPageCache(); } catch(e) {}
   showSkeleton();
 
-  let appids = [];
+  // Jika user sudah set URL RAW GitHub, muat langsung
   try {
-    console.log('[GameHub] initGamesPage: fetching trending app ids...');
-    appids = await fetchTrendingAppIds();
-    console.log('[GameHub] initGamesPage: got appids', appids?.length, appids?.slice?.(0,10));
-  } catch (e) {
-    console.warn("Trending fetch failed, attempting fallbacks", e && e.message);
-    // First try GitHub raw app list as primary source
-    try {
-      const gh = await fetchGithubAppList();
-      if (Array.isArray(gh) && gh.length) {
-        // insert first PAGE_SIZE as placeholders and queue the rest
-        const first = gh.slice(0, PAGE_SIZE);
-        originalData = [];
-        first.slice().reverse().forEach((it) => {
-          originalData.unshift({ appid: it.appid, title: it.name || '', header: '', header_candidates: [], genre_display: '', _placeholder: true });
-        });
-        const rest = gh.slice(PAGE_SIZE).map(x => x.appid);
-        remainingAppIds = rest.slice();
-        saveRemaining();
-        // render page with placeholders
-        loadGenreList(originalData);
-        await renderPage(1);
+    const manualUrl = window.GAMEHUB_RAW_URL || localStorage.getItem('gamehub_manual_raw');
+    if (manualUrl) {
+      try {
+        console.log('[GameHub] initGamesPage: loading manual game list from', manualUrl);
+        await loadRemoteGameList(manualUrl);
+        try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+        // We already rendered page 1 inside loader
         return;
+      } catch (e) {
+        console.warn('[GameHub] loadRemoteGameList failed', e && e.message);
       }
-    } catch (ghErr) {
-      console.warn('[GameHub] fetchGithubAppList in init failed', ghErr && ghErr.message);
     }
+  } catch (e) {}
 
-    // Try sample_page.json first; if it contains normalized game objects use them,
-    // otherwise treat it as array of appids. If that fails, use local popular_appids.json
-    try {
-      const sample = await fetch('/data/sample_page.json').then(r => r.json()).catch(() => null);
-      if (Array.isArray(sample) && sample.length) {
-        // detect if sample contains normalized game objects (has appid and title)
-        if (typeof sample[0] === 'object' && (sample[0].appid || sample[0].title)) {
-          originalData = sample;
-          filteredData = sample;
-          loadGenreList(originalData);
-          await renderPage(1);
-          return;
-        }
-        // if it's an array of numbers, use as remainingAppIds
-        if (typeof sample[0] === 'number') {
-          remainingAppIds = sample.slice();
-          saveRemaining();
-          // continue to normal flow which will build page 1
-        }
-      }
-    } catch (se) {
-      console.warn('[GameHub] sample_page.json fallback failed', se && se.message);
+  // Raw-only init: muat daftar RAW GitHub sebagai data awal
+  try {
+    const gh = await fetchGithubAppList();
+    if (Array.isArray(gh) && gh.length) {
+      // RAW lengkap: jika format berisi objek dengan field lengkap, normalisasi langsung.
+      originalData = gh.map(it => ({
+        appid: Number(it.appid || it.id || 0),
+        title: String(it.name || it.title || ''),
+        header: String(it.header || ''),
+        genre: it.genre || it.genre_display || '',
+        genre_display: it.genre_display || it.genre || '',
+        short_description: it.short_description || '',
+        developers: Array.isArray(it.developers) ? it.developers : (it.developers ? [String(it.developers)] : []),
+        publishers: Array.isArray(it.publishers) ? it.publishers : (it.publishers ? [String(it.publishers)] : []),
+        release_date: String(it.release_date || ''),
+        price_display: String(it.price_display || ''),
+        price_normalized: Number(it.price_normalized || 0),
+        price_initial: Number(it.price_initial || it.price_normalized || 0),
+        protection: it.protection === true ? true : false
+      }));
+      filteredData = originalData.slice();
+      loadGenreList(originalData);
+      await renderPage(1);
+      try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+      return;
     }
+  } catch (e) { console.warn('[GameHub] initGamesPage GitHub raw init failed', e && e.message); }
 
-    // final fallback: try local popular_appids.json
-    try {
-      const p = await fetch('/data/popular_appids.json').then(r => r.json()).catch(() => null);
-      if (Array.isArray(p) && p.length) {
-        remainingAppIds = p.slice();
-        saveRemaining();
-      }
-    } catch (pe) {
-      console.warn('[GameHub] popular_appids.json fallback failed', pe && pe.message);
+  // Fallback: try sample_page.json containing normalized objects
+  try {
+    const sample = await fetch('/data/sample_page.json').then(r => r.json()).catch(() => null);
+    if (Array.isArray(sample) && sample.length) {
+      originalData = sample;
+      filteredData = sample;
+      loadGenreList(originalData);
+      await renderPage(1);
+      try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+      return;
     }
-    // continue to building from remainingAppIds below
-  }
+  } catch (se) { console.warn('[GameHub] sample_page.json fallback failed', se && se.message); }
 
-  // Prepare for incremental loading: keep remaining appids and build only as needed
-  originalData = [];
-  filteredData = [];
-    // attempt to restore remaining ids from previous session
-    const saved = loadRemaining();
-    if (saved && saved.length) {
-      console.log('[GameHub] restored remainingAppIds from storage', saved.length);
-      // merge saved + new trending but avoid duplicates
-      const seen = new Set(saved);
-      appids.forEach(a => { if (!seen.has(a)) saved.push(a); });
-      remainingAppIds = saved;
-    } else {
-      remainingAppIds = [...appids];
-    }
-    saveRemaining();
-  // restore search cursor if present
-  try { const c = parseInt(localStorage.getItem('gamehub_search_cursor') || '0',10); if (!isNaN(c)) searchCursor = c; } catch(e) { searchCursor = 0; }
-  // Preload the full Steam app list in background so sampling can succeed later
-  // Do not preload the full app list to avoid unnecessary GetAppList requests (404).
-  // We will call sampling (GetAppList) only as a fallback when search scraping yields no results.
-  // ensure first page is loaded and then render
-  await ensureGamesForPage(1);
-  // set filteredData once after initial build (do not overwrite filteredData on every ensure)
-  filteredData = originalData;
-  loadGenreList(originalData);
-  await renderPage(1);
-
-  // Start background worker to fetch DRM/protection info slowly
-  try { startProtectionWorker(); } catch (e) {}
-
-  // Schedule periodic background refresh of the GitHub raw app list (12 hours)
+  // Penyegaran berkala data (12 jam)
   try {
     if (!window._gamehub_github_refresh_scheduled) {
       window._gamehub_github_refresh_scheduled = true;
@@ -389,43 +353,51 @@ async function initGamesPage() {
           let before = [];
           try { before = JSON.parse(beforeRaw); } catch (e) { before = []; }
           const updated = await fetchGithubAppList(false);
-          // If new ids appeared, notify user and queue them for build
-          const beforeSet = new Set((before || []).map(x => (x && x.appid) ? Number(x.appid) : Number(x)).filter(Boolean));
-          const newItems = (updated || []).filter(it => !beforeSet.has(Number(it.appid)));
-          if (newItems && newItems.length) {
-            console.log('[GameHub] background refresh found new items', newItems.length);
-            // If user is viewing first page, insert placeholders immediately; otherwise show transient notice
-            const newIds = newItems.map(x => Number(x.appid));
-            // add new ids to front of remainingAppIds and persist
-            remainingAppIds = newIds.concat(remainingAppIds.filter(id => !newIds.includes(id)));
-            saveRemaining();
-            // If on page 1, show placeholders
-            if (currentPage === 1) {
-              const list = document.getElementById('game-list');
-              // insert up to PAGE_SIZE placeholders at the top
-              const toShow = newItems.slice(0, PAGE_SIZE);
-              toShow.reverse().forEach(it => {
-                // ensure not already present
-                const exists = originalData.find(x => x && x.appid === Number(it.appid));
-                if (!exists) {
-                  originalData.unshift({ appid: Number(it.appid), title: it.name || '', header: '', header_candidates: [], genre_display: '', _placeholder: true });
-                }
-              });
-              try { renderPage(1); } catch (e) {}
-            } else {
-              showTransientMessage(`Daftar raw diperbarui: ${newItems.length} baru (klik Refresh)`, 7000);
-            }
+          // Bandingkan dan tampilkan notifikasi singkat jika ada item baru
+          const beforeSet = new Set((before || []).map(x => Number(x.appid || x)).filter(Boolean));
+          const updatedSet = new Set((updated || []).map(x => Number(x.appid || x)).filter(Boolean));
+          const newCount = [...updatedSet].filter(id => !beforeSet.has(id)).length;
+          // Perbarui label "Terakhir diperbarui" setiap tick (fungsi didefinisikan di filter.js)
+          try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+          if (newCount > 0) {
+            // Pesan netral tanpa menyebut RAW atau tombol
+            showTransientMessage(`Data diperbarui: ${newCount} entri baru.`, 6000);
           }
         } catch (e) { console.warn('[GameHub] background refresh error', e && e.message); }
       }, 12 * 60 * 60 * 1000);
+      // Trigger saat tab kembali aktif jika TTL lewat
+      document.addEventListener('visibilitychange', async () => {
+        try {
+          if (document.visibilityState === 'visible') {
+            const metaRaw = localStorage.getItem('gamehub_github_meta');
+            let meta = {};
+            try { meta = metaRaw ? JSON.parse(metaRaw) : {}; } catch(e) { meta = {}; }
+            const ts = meta && meta.ts ? meta.ts : 0;
+            if (Date.now() - ts > (12 * 60 * 60 * 1000)) {
+              console.log('[GameHub] visibility trigger fetchGithubAppList');
+              await fetchGithubAppList(false);
+              try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+            }
+          }
+        } catch (e) {}
+      });
+
+      // Trigger saat kembali online
+      window.addEventListener('online', async () => {
+        try {
+          console.log('[GameHub] online trigger fetchGithubAppList');
+          await fetchGithubAppList(false);
+          try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+        } catch (e) {}
+      });
     }
   } catch (e) { console.warn('[GameHub] schedule refresh failed', e && e.message); }
 }
 
-// Manual refresh handler bound to the 'Refresh Raw' button
+// Handler refresh manual dihapus dari UI; fungsi dipertahankan jika dipanggil internal
 async function refreshGithubRaw() {
   try {
-    showBlockingOverlay('Memeriksa pembaruan daftar raw...');
+    showBlockingOverlay('Memeriksa pembaruan data...');
     // read previous cache before forcing a fetch
     const beforeRaw = localStorage.getItem('gamehub_github_appids') || '[]';
     let before = [];
@@ -435,29 +407,44 @@ async function refreshGithubRaw() {
     const updated = await fetchGithubAppList(true);
     hideBlockingOverlay();
     if (!updated || !updated.length) {
-      showTransientMessage('Tidak ada daftar raw ditemukan.', 4000);
+      showTransientMessage('Data tidak tersedia.', 4000);
       return;
     }
     const newItems = (updated || []).filter(it => !beforeSet.has(Number(it.appid)));
     if (!newItems.length) {
-      showTransientMessage('Daftar raw sudah terbaru.', 4000);
+      showTransientMessage('Data sudah terbaru.', 4000);
       return;
     }
-
-    // Integrate new items: insert placeholders and queue remaining ids
-    const newIds = newItems.map(x => Number(x.appid));
-    // Insert placeholders at the top of originalData for immediate visibility
-    const toShow = newItems.slice(0, PAGE_SIZE);
-    toShow.reverse().forEach(it => {
-      const exists = originalData.find(x => x && x.appid === Number(it.appid));
-      if (!exists) {
-        originalData.unshift({ appid: Number(it.appid), title: it.name || '', header: '', header_candidates: [], genre_display: '', _placeholder: true });
+    // Raw-only: gantikan dataset penuh dengan versi terbaru, lalu render
+    originalData = updated.map(it => ({
+      appid: Number(it.appid || it.id || 0),
+      title: String(it.name || it.title || ''),
+      header: String(it.header || ''),
+      genre: it.genre || it.genre_display || '',
+      genre_display: it.genre_display || it.genre || '',
+      short_description: it.short_description || '',
+      developers: Array.isArray(it.developers) ? it.developers : (it.developers ? [String(it.developers)] : []),
+      publishers: Array.isArray(it.publishers) ? it.publishers : (it.publishers ? [String(it.publishers)] : []),
+      release_date: String(it.release_date || ''),
+      price_display: String(it.price_display || ''),
+      price_normalized: Number(it.price_normalized || 0),
+      price_initial: Number(it.price_initial || it.price_normalized || 0),
+      protection: it.protection === true ? true : false
+    }));
+    filteredData = originalData.slice();
+    // rebuild pageCache untuk pagination stabil
+    try {
+      Object.keys(pageCache).forEach(k => delete pageCache[k]);
+      const total = Math.ceil(originalData.length / PAGE_SIZE) || 0;
+      for (let p = 1; p <= total; p++) {
+        const start = (p - 1) * PAGE_SIZE;
+        pageCache[p] = originalData.slice(start, start + PAGE_SIZE);
       }
-    });
-    // Merge new ids to remainingAppIds front, avoid duplicates
-    remainingAppIds = newIds.concat(remainingAppIds.filter(id => !newIds.includes(id)));
-    saveRemaining();
-    showTransientMessage(`Daftar raw diperbarui: ${newItems.length} item baru.`, 6000);
+      savePageCache();
+    } catch (e) {}
+    // Sinkronkan label setelah pembaruan manual
+    try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+    showTransientMessage(`Data diperbarui: ${newItems.length} entri baru.`, 6000);
     try { renderPage(1); } catch (e) { console.warn('[GameHub] render after refresh failed', e && e.message); }
   } catch (e) {
     hideBlockingOverlay();
@@ -466,119 +453,7 @@ async function refreshGithubRaw() {
   }
 }
 
-async function ensureGamesForPage(page) {
-  // build until we have enough items for `page` or until no remaining ids
-  const needed = page * PAGE_SIZE;
-  if (buildingInProgress) return;
-  buildingInProgress = true;
-  // show skeletons only when list empty (showSkeleton respects that)
-  showSkeleton();
-  let idx = originalData.length;
-  // if we ran out of remaining ids, try to sample more from global app list
-  try {
-    // Keep trying until we have enough built items for this page or no more sources
-    // Keep trying until the filtered dataset has enough items for this page
-    // This ensures that when filters are active we continue scraping/building
-    // until `filteredData.length >= needed` or until no more sources exist.
-    while ((filteredData && filteredData.length) ? filteredData.length < needed : originalData.length < needed) {
-      // if we ran out of remaining ids, try to fetch more via search (on-demand)
-      if (remainingAppIds.length === 0) {
-        try {
-          const existing = new Set(originalData.map(x => x.appid));
-          let filled = false;
-          // attempt multiple search pages before giving up
-          for (let attempt = 0; attempt < 5 && !filled; attempt++) {
-            console.log('[GameHub] fetching search page at cursor', searchCursor, 'attempt', attempt+1);
-                // show scraping indicator when we actively fetch search pages
-                showScrapeIndicator();
-            const searchBatch = await fetchSearchPage(searchCursor, PAGE_SIZE);
-            console.log('[GameHub] fetchSearchPage returned', searchBatch.length);
-            if (searchBatch && searchBatch.length) {
-              for (const id of searchBatch) {
-                if (!existing.has(id)) remainingAppIds.push(id);
-              }
-              searchCursor += PAGE_SIZE;
-              try { localStorage.setItem('gamehub_search_cursor', String(searchCursor)); } catch(e){}
-              maybeHasMore = true;
-              saveRemaining();
-              filled = remainingAppIds.length > 0;
-                    hideScrapeIndicator();
-                    break;
-            }
-            // small pause before next attempt
-            await new Promise(r => setTimeout(r, 150 * (attempt + 1)));
-          }
-                  // hide indicator in case attempts exhausted without filled
-                  hideScrapeIndicator();
-          if (!filled) {
-            // fallback to sampling the full app list once
-                    // show indicator while sampling as well
-                    showScrapeIndicator();
-            const more = await sampleAppIds(new Set(originalData.map(x => x.appid)), 200);
-            if (more && more.length) {
-              remainingAppIds.push(...more);
-              maybeHasMore = true;
-              saveRemaining();
-                    hideScrapeIndicator();
-            } else {
-              maybeHasMore = false;
-                    hideScrapeIndicator();
-                    // nothing more we can do — if user was blocked waiting, show message
-                    if ((filteredData && filteredData.length) ? filteredData.length < needed : originalData.length < needed) {
-                      showTransientMessage('Tidak cukup hasil untuk memenuhi page ini', 5000);
-                    }
-                  break; // nothing more we can do
-            }
-          }
-        } catch (e) {
-          console.warn('[GameHub] search/sample failed', e && e.message);
-          maybeHasMore = false;
-          break;
-        }
-      }
-
-      // Build in batches with limited concurrency
-        // If proxy is likely down, pause building details to avoid repeated errors
-        try {
-          if (typeof isProxyLikelyDown === 'function' && isProxyLikelyDown() && remainingAppIds.length > 0) {
-            showTransientMessage('Proxy lokal tidak tersedia — menunda pengambilan detail sampai koneksi pulih.', 5000);
-            break; // break out of building loop for now
-          }
-        } catch (e) {}
-
-        if (remainingAppIds.length === 0) break; // nothing to build
-      const batch = remainingAppIds.splice(0, BUILD_CONCURRENCY);
-      saveRemaining();
-      const startIdx = idx + 1;
-      const promises = batch.map(async (id, i) => {
-        const cur = startIdx + i;
-        console.log('[GameHub] building game', cur, '/', (cur + remainingAppIds.length), 'appid=', id);
-        try {
-          const g = await buildGame(id);
-          if (g) {
-            originalData.push(g);
-            addBuiltCache(id);
-            console.log('[GameHub] built game ok', id, g.title);
-            try { replacePlaceholderWithGame(id, g); } catch(e) {}
-          } else {
-            console.warn('[GameHub] buildGame returned null for', id);
-          }
-        } catch (e) {
-          console.warn('[GameHub] buildGame threw for', id, e && e.message);
-        }
-      });
-      await Promise.all(promises);
-      idx = originalData.length;
-      // reapply filters silently (don't force navigation)
-      if (typeof applyFilters === 'function') applyFilters(false);
-      renderPagination();
-      // loop again until originalData.length >= needed or no more sources
-    }
-  } finally {
-    buildingInProgress = false;
-    renderPagination();
-  }
-}
+async function ensureGamesForPage(page) { /* raw-only: disabled */ }
 
 function showSkeleton() {
   const list = document.getElementById("game-list");
@@ -630,38 +505,7 @@ async function renderPage(page) {
   // ensure we have enough games for this page (build if necessary)
     // If the user requested a page that currently lacks enough filtered items,
     // we should NOT start building additional items when filters are active.
-    const dataSourceCheck = (filteredData && filteredData.length) ? filteredData : originalData;
-    const haveNow = dataSourceCheck.length;
-    const need = page * PAGE_SIZE;
-    const filteringActive = !!window.filtersActive;
-    const fillFiltered = !!window.fillFilteredPages;
-    let blockingShown = false;
-
-    if (!filteringActive) {
-      // normal (no filters): allow building to fill the page
-      if (haveNow < need && (remainingAppIds.length > 0 || maybeHasMore)) {
-        showBlockingOverlay('Mengumpulkan lebih banyak game untuk mengisi halaman...');
-        blockingShown = true;
-      }
-      await ensureGamesForPage(page);
-      if (blockingShown) hideBlockingOverlay();
-    } else {
-      // filters active: If Premium/Standard is active we should attempt to
-      // fill the page to PAGE_SIZE by building more items that match the
-      // filters. For other filters, avoid network builds and show limited results.
-      if (fillFiltered) {
-        if (haveNow < need && (remainingAppIds.length > 0 || maybeHasMore)) {
-          showBlockingOverlay('Mengumpulkan lebih banyak game untuk mengisi halaman filter...');
-          blockingShown = true;
-        }
-        await ensureGamesForPage(page);
-        if (blockingShown) hideBlockingOverlay();
-      } else {
-        if (haveNow < need) {
-          showTransientMessage('Hanya menampilkan hasil yang sudah tersedia untuk filter ini.', 3000);
-        }
-      }
-    }
+    // Raw-only: tidak ada proses build tambahan saat render
 
   // Choose source data according to current filters so render respects filters
   const dataSource = (filteredData && filteredData.length) ? filteredData : originalData;
@@ -678,17 +522,7 @@ async function renderPage(page) {
   slice.forEach((g) => appendGameCard(list, g));
   renderPagination();
 
-  // Background prefetch: prepare the next page so navigation is faster.
-  // Start asynchronously and don't block the UI. ensureGamesForPage will
-  // return early if a build is already in progress.
-  try {
-    setTimeout(() => {
-      // Only attempt prefetch if there may be more games to fetch or we have remaining ids
-      if (remainingAppIds.length > 0 || maybeHasMore) {
-        ensureGamesForPage(page + 1).catch(() => {});
-      }
-    }, 50);
-  } catch (e) {}
+  // Raw-only: tidak ada prefetch latar belakang
 
   // Scroll to top so user sees the page head
   try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e) { window.scrollTo(0,0); }
@@ -696,8 +530,7 @@ async function renderPage(page) {
 
 function renderPagination() {
   const loadedPages = Math.max(1, Math.ceil(filteredData.length / PAGE_SIZE));
-  // allow one more page if we have more ids to fetch
-  const totalPages = Math.max(1, loadedPages + ((remainingAppIds.length > 0 || maybeHasMore) ? 1 : 0));
+  const totalPages = loadedPages; // Raw-only: tidak ada halaman ekstra
   const p = document.getElementById("pagination");
   if (!p) return;
   p.innerHTML = "";
@@ -729,7 +562,7 @@ function renderPagination() {
     "Next",
     Math.min(totalPages, currentPage + 1),
     // disable Next if we're on last loaded page and no remaining ids, or if a build is in progress
-    (currentPage >= loadedPages && remainingAppIds.length === 0 && !maybeHasMore) || buildingInProgress
+    currentPage >= loadedPages || buildingInProgress
   );
   // show loading state on Next if building
   const nextBtn = p.querySelector('button:last-child');
@@ -765,7 +598,6 @@ function renderGameCardHTML(game) {
     protection = ``;
   }
 
-  const header_candidates = JSON.stringify(game.header_candidates || []);
   return `
   <button id="game-${game.appid}" onclick="openDetail(${game.appid})"
     class="fade-up text-left flex items-center gap-4 bg-[#151515] hover:bg-white/5 p-4 rounded-xl
@@ -773,8 +605,7 @@ function renderGameCardHTML(game) {
 
     <div class="relative w-36 h-20 flex-shrink-0">
        <img src="${game.header}" class="w-full h-full object-cover rounded-lg shadow"
-         data-candidates='${header_candidates}'
-         onerror="(function(img){img.onerror=null;try{var list=JSON.parse(img.getAttribute('data-candidates')||'[]');var next=list.shift();img.setAttribute('data-candidates',JSON.stringify(list));if(next){img.src=next;console.warn('[GameHub] image fallback to', next);}else{img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';console.warn('[GameHub] image fallback to placeholder');}}catch(e){img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';}})(this);">
+         onerror="(function(img){img.onerror=null;img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';})(this);">
       <div class="absolute top-1 left-1 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow">
         ${premiumLabel}
       </div>
@@ -796,48 +627,7 @@ function renderGameCardHTML(game) {
 
 // Protection worker: scan originalData for items missing protection and fetch slowly
 let _protectionWorker = { running: false, timer: null };
-function startProtectionWorker() {
-  if (_protectionWorker.running) return;
-  _protectionWorker.running = true;
-  // process one item every ~1500ms
-  async function tick() {
-    try {
-      if (typeof isProxyLikelyDown === 'function' && isProxyLikelyDown()) {
-        // pause and retry later
-        _protectionWorker.timer = setTimeout(tick, 5000);
-        return;
-      }
-      if (!Array.isArray(originalData) || originalData.length === 0) {
-        _protectionWorker.timer = setTimeout(tick, 2000);
-        return;
-      }
-      // find next game that does not have protection set and is not a placeholder
-      const next = originalData.find(g => g && (g.protection === undefined || g.protection === null) && !g._placeholder);
-      if (!next) {
-        _protectionWorker.timer = setTimeout(tick, 2000);
-        return;
-      }
-      // call global detectProtection (exposed by api.js)
-      try {
-        if (typeof window.detectProtection === 'function') {
-          const has = await window.detectProtection(next.appid, next.title || '');
-          next.protection = !!has;
-          // update DOM card if visible
-          try {
-            const el = document.getElementById('game-' + next.appid);
-            if (el) {
-              el.outerHTML = renderGameCardHTML(next);
-            }
-          } catch (e) {}
-        }
-      } catch (e) {
-        // ignore per-item errors
-      }
-    } catch (e) {}
-    _protectionWorker.timer = setTimeout(tick, 1500);
-  }
-  tick();
-}
+function startProtectionWorker() { /* raw-only: disabled */ }
 
 function stopProtectionWorker() {
   _protectionWorker.running = false;
@@ -903,33 +693,8 @@ function replacePlaceholderWithGame(appid, game) {
       for (let i = 0; i < originalData.length; i++) {
         if (originalData[i] && originalData[i].appid === appid && originalData[i]._placeholder) {
           originalData[i] = game;
-          break;
         }
       }
     } catch (e) {}
-  } catch (e) { console.warn('[GameHub] replacePlaceholderWithGame error', e && e.message); }
-}
-
-function loadGenreList(data) {
-  // Render all genres from the canonical steam_genres.json so filters always show full list
-  const container = document.getElementById("genreList");
-  if (!container) return;
-  container.innerHTML = "";
-  fetch('/data/steam_genres.json')
-    .then((r) => r.json())
-    .then((genreMeta) => {
-      genreMeta
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .forEach((meta) => {
-          container.innerHTML += `
-      <label class="flex items-center gap-2">
-        <input type="checkbox" value="${meta.id}" onchange="applyFilters()" class="accent-purple-500 genreCheck">
-        <span class="px-2 py-[3px] rounded-md text-sm text-white" style="background-color: ${meta.color};">${meta.icon || ''} ${meta.name}</span>
-      </label>`;
-        });
-    })
-    .catch(() => {
-      // fallback: empty
-      container.innerHTML = "";
-    });
+  } catch (e) {}
 }

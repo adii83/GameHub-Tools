@@ -1,0 +1,52 @@
+/* Premium & elegan scrollbar styling */
+/* Global scrollbars */
+html, body {
+	scrollbar-width: thin;               /* Firefox */
+	scrollbar-color: #5b21b6 #0f0f10;    /* thumb + track */
+}
+
+/* WebKit-based browsers */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+	background: #0f0f10;
+}
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, #7c3aed, #5b21b6);
+	border-radius: 10px;
+	border: 2px solid #0f0f10;
+}
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+	background: linear-gradient(180deg, #8b5cf6, #6d28d9);
+}
+
+/* Utility: apply premium scrollbar to any scrollable container */
+.premium-scroll {
+	scrollbar-width: thin;               /* Firefox */
+	scrollbar-color: #7c3aed #131316;    /* thumb + track */
+}
+.premium-scroll::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+.premium-scroll::-webkit-scrollbar-track {
+	background: #131316;
+	border-radius: 10px;
+}
+.premium-scroll::-webkit-scrollbar-thumb {
+	background: linear-gradient(180deg, #8b5cf6, #6d28d9);
+	border-radius: 10px;
+	border: 2px solid #131316;
+}
+.premium-scroll::-webkit-scrollbar-thumb:hover {
+	background: linear-gradient(180deg, #a78bfa, #7c3aed);
+}
+
+/* Smooth scrolling */
+html { scroll-behavior: smooth; }
