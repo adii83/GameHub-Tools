@@ -127,8 +127,8 @@ async function performRemoteSearch() {
     try {
       // Pass original raw query to remote search, but use fuzzy placement locally
       metas = await searchGithub(qRaw, PAGE_SIZE);
-      if (metas && metas.length) console.log('[GameHub] performRemoteSearch (data) found', metas.length);
-    } catch (e) { console.warn('[GameHub] searchGithub error', e && e.message); metas = []; }
+      
+    } catch (e) { metas = []; }
     try {
       if (metas && metas.length) {
         const show = metas.slice(0, PAGE_SIZE);
@@ -155,9 +155,8 @@ async function performRemoteSearch() {
           }
         } catch (e) {}
       }
-    } catch (e) { console.warn('[GameHub] create placeholders failed', e && e.message); }
+    } catch (e) {}
   } catch (e) {
-    console.warn('[GameHub] performRemoteSearch error', e && e.message);
   } finally {
     hideBlockingOverlay();
   }

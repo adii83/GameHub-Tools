@@ -20,7 +20,6 @@ function loadPageCache() {
         // ensure we store arrays
         if (Array.isArray(obj[k])) pageCache[k] = obj[k];
       });
-      console.log('[GameHub] loaded pageCache from storage', Object.keys(pageCache));
     }
   } catch (e) {
     // ignore
@@ -36,17 +35,6 @@ function prunePageCache() {
   } catch (e) {}
 }
 
-  // Auto-load user's provided raw GitHub URL (once) — set by user in this session
-  try {
-    const provided = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/refs/heads/main/steam_data.json';
-    const existing = localStorage.getItem('gamehub_manual_raw');
-    if (!existing || String(existing).trim() !== provided) {
-      console.log('[GameHub] auto-loading provided raw game list');
-      // Use the public helper which persists the URL
-      try { if (window && typeof window.useRawGameList === 'function') window.useRawGameList(provided); else { localStorage.setItem('gamehub_manual_raw', provided); window.GAMEHUB_RAW_URL = provided; } } catch (e) { localStorage.setItem('gamehub_manual_raw', provided); window.GAMEHUB_RAW_URL = provided; }
-    }
-  } catch (e) {}
-
 function savePageCache() {
   try {
     prunePageCache();
@@ -54,6 +42,156 @@ function savePageCache() {
   } catch (e) {
     // ignore storage errors
   }
+}
+// --- Local Steam data merge helpers ---
+// Load override data: combines built-in + global override (from GitHub) + user override (local)
+// Priority: User Override > Global Override > Built-in Override > Raw Data
+async function loadLocalSteamData() {
+  try {
+    const overrideMap = new Map();
+    
+    // 1. Load built-in local_data_steam.json (from app bundle) - PRIORITY 3 (terendah)
+    // Opsional: bisa dihapus jika tidak digunakan, tidak akan error
+    try {
+      const res = await fetch('/data/local_data_steam.json', { cache: 'no-cache' });
+      if (res.ok) {
+        const obj = await res.json();
+        if (obj && typeof obj === 'object') {
+          for (const [k, v] of Object.entries(obj)) {
+            const id = Number(k);
+            if (!Number.isFinite(id)) continue;
+            overrideMap.set(id, v || {});
+          }
+        }
+      }
+    } catch (e) {
+      // File tidak ada? Tidak apa-apa, lanjut ke global override
+    }
+    
+    // 2. Load global override from C# bridge (downloaded from GitHub, cached on disk) - PRIORITY 2
+    // Global override OVERWRITES built-in (prioritas lebih tinggi)
+    if (window.desktopBridge && typeof window.desktopBridge.getGlobalOverride === 'function') {
+      try {
+        // Load from disk (false = use cache, tapi setelah force update cache sudah ter-update)
+        // Setelah force update, in-memory cache sudah di-clear di C#, jadi akan load dari disk yang baru
+        const globalOverride = await window.desktopBridge.getGlobalOverride(false);
+        if (globalOverride && typeof globalOverride === 'object') {
+          const overrideCount = Object.keys(globalOverride).length;
+          for (const [k, v] of Object.entries(globalOverride)) {
+            const id = Number(k);
+            if (!Number.isFinite(id)) continue;
+            // Global override overwrites built-in (jika ada)
+            overrideMap.set(id, v || {});
+          }
+          // Log untuk debug
+          if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+            try {
+              window.desktopBridge.send('AppLog', { message: `[LoadOverride] Loaded ${overrideCount} override entries from global override` });
+            } catch (e) {}
+          }
+        }
+      } catch (e) {
+        if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+          try {
+            window.desktopBridge.send('AppLog', { message: `[LoadOverride] Error loading global override: ${e.message || 'Unknown'}` });
+          } catch (e2) {}
+        }
+      }
+    }
+    
+    // 3. Load user override from C# bridge (user-specific) - PRIORITY 1 (TERTINGGI)
+    // User override OVERWRITES semua (prioritas tertinggi)
+    if (window.desktopBridge && typeof window.desktopBridge.getUserOverride === 'function') {
+      try {
+        const userOverride = await window.desktopBridge.getUserOverride();
+        if (userOverride && typeof userOverride === 'object') {
+          for (const [k, v] of Object.entries(userOverride)) {
+            const id = Number(k);
+            if (!Number.isFinite(id)) continue;
+            // User override has highest priority (overwrites everything)
+            overrideMap.set(id, v || {});
+          }
+        }
+      } catch (e) {}
+    }
+    
+    return overrideMap;
+  } catch (e) { return new Map(); }
+}
+
+function applyLocalOverridesToItem(rawItem, localItem) {
+  try {
+    const merged = Object.assign({}, rawItem);
+    const keys = [
+      'title','header','genre','genre_display','short_description',
+      'developers','publishers','release_date','price_display','price_normalized','price_initial','protection','last_update'
+    ];
+    for (const k of keys) {
+      if (Object.prototype.hasOwnProperty.call(localItem, k)) {
+        merged[k] = localItem[k];
+      }
+    }
+    merged.appid = Number(merged.appid || localItem.appid || rawItem.appid || 0);
+    const pn = Number(merged.price_normalized ?? merged.price_initial ?? 0) || 0;
+    merged.price_normalized = pn;
+    merged.price_initial = Number(merged.price_initial ?? pn) || pn;
+    return merged;
+  } catch (e) { return rawItem; }
+}
+
+function coerceLocalEntry(appid, local) {
+  try {
+    return {
+      appid: Number(appid),
+      title: String(local.title || ''),
+      header: String(local.header || ''),
+      genre: local.genre || local.genre_display || '',
+      genre_display: local.genre_display || local.genre || '',
+      short_description: String(local.short_description || ''),
+      developers: Array.isArray(local.developers) ? local.developers : (local.developers ? [String(local.developers)] : []),
+      publishers: Array.isArray(local.publishers) ? local.publishers : (local.publishers ? [String(local.publishers)] : []),
+      release_date: String(local.release_date || ''),
+      price_display: String(local.price_display || ''),
+      price_normalized: Number(local.price_normalized ?? 0) || 0,
+      price_initial: Number(local.price_initial ?? local.price_normalized ?? 0) || 0,
+      protection: (local.protection === true) ? true : (local.protection === false ? false : null),
+      last_update: local.last_update || ''
+    };
+  } catch (e) { return { appid: Number(appid) }; }
+}
+
+async function mergeWithLocalDataset(arr) {
+  try {
+    const localMap = await loadLocalSteamData();
+    if (!(localMap && localMap.size)) return arr;
+    const byId = new Map();
+    const out = [];
+    // First: process existing items from raw data and apply overrides
+    for (const it of arr) {
+      const id = Number(it.appid || it.id);
+      byId.set(id, true);
+      const local = localMap.get(id);
+      out.push(local ? applyLocalOverridesToItem(it, local) : it);
+    }
+    // Then: add new items from override that don't exist in raw data
+    let addedCount = 0;
+    for (const [id, local] of localMap.entries()) {
+      if (!byId.has(id)) {
+        const newEntry = coerceLocalEntry(id, local);
+        if (newEntry && newEntry.appid) {
+          out.push(newEntry);
+          addedCount++;
+        }
+      }
+    }
+    // Log jika ada game baru ditambahkan
+    if (addedCount > 0 && window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+      try {
+        window.desktopBridge.send('AppLog', { message: `[Merge] ${addedCount} game baru ditambahkan dari override` });
+      } catch (e) {}
+    }
+    return out;
+  } catch (e) { return arr; }
 }
 // Configuration / storage keys
 // Raw-only: nonaktifkan builder dan storage terkait
@@ -83,18 +221,48 @@ function showBlockingOverlay(message, options = {}) {
       const box = document.createElement('div');
       box.style.cssText = 'position:relative;min-width:320px;max-width:90%;background:#101010;padding:20px;border-radius:12px;color:#fff;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 10px 40px rgba(0,0,0,0.6)';
       const spinner = document.createElement('div');
+      spinner.id = 'gamehub-block-spinner';
       spinner.style.cssText = 'width:36px;height:36px;border-radius:50%;border:4px solid rgba(255,255,255,0.08);border-top-color:#9b5cff;animation:gamehub-spin 1s linear infinite';
       const text = document.createElement('div');
       text.id = 'gamehub-block-overlay-text';
       text.style.cssText = 'text-align:center;font-size:15px';
+      // Progress bar container
+      const progressContainer = document.createElement('div');
+      progressContainer.id = 'gamehub-block-progress-container';
+      progressContainer.style.cssText = 'width:100%;display:none;flex-direction:column;gap:8px;margin-top:4px';
+      const progressBarBg = document.createElement('div');
+      progressBarBg.style.cssText = 'width:100%;height:8px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden';
+      const progressBar = document.createElement('div');
+      progressBar.id = 'gamehub-block-progress-bar';
+      progressBar.style.cssText = 'height:100%;background:linear-gradient(90deg,#9b5cff,#6d28d9);border-radius:4px;width:0%;transition:width 0.3s ease';
+      const progressText = document.createElement('div');
+      progressText.id = 'gamehub-block-progress-text';
+      progressText.style.cssText = 'text-align:center;font-size:13px;color:#9b5cff;font-weight:500';
+      progressBarBg.appendChild(progressBar);
+      progressContainer.appendChild(progressBarBg);
+      progressContainer.appendChild(progressText);
       box.appendChild(spinner);
       box.appendChild(text);
+      box.appendChild(progressContainer);
       overlay.appendChild(bg);
       overlay.appendChild(box);
       document.body.appendChild(overlay);
     }
     const textEl = document.getElementById('gamehub-block-overlay-text');
     if (textEl) textEl.textContent = message || 'Mohon tunggu — sedang mengumpulkan data...';
+    
+    // Show/hide progress bar based on options
+    const progressContainer = document.getElementById('gamehub-block-progress-container');
+    const spinner = document.getElementById('gamehub-block-spinner');
+    if (options.showProgress) {
+      if (progressContainer) progressContainer.style.display = 'flex';
+      if (spinner) spinner.style.display = 'none';
+      updateBlockingOverlayProgress(0);
+    } else {
+      if (progressContainer) progressContainer.style.display = 'none';
+      if (spinner) spinner.style.display = 'block';
+    }
+    
     overlay.style.display = 'flex';
     // If closable option provided, show a small dismiss button
     if (options.closable) {
@@ -144,6 +312,27 @@ function hideBlockingOverlay() {
   try {
     const overlay = document.getElementById('gamehub-block-overlay');
     if (overlay) overlay.style.display = 'none';
+    // Reset progress
+    updateBlockingOverlayProgress(0);
+  } catch (e) {}
+}
+
+function updateBlockingOverlayProgress(percent, message = null) {
+  try {
+    const progressBar = document.getElementById('gamehub-block-progress-bar');
+    const progressText = document.getElementById('gamehub-block-progress-text');
+    if (progressBar) {
+      const clamped = Math.max(0, Math.min(100, percent));
+      progressBar.style.width = clamped + '%';
+    }
+    if (progressText) {
+      if (message) {
+        progressText.textContent = message;
+      } else {
+        const percentText = `${Math.max(0, Math.min(100, Math.round(percent)))}%`;
+        progressText.textContent = percentText;
+      }
+    }
   } catch (e) {}
 }
 
@@ -225,7 +414,7 @@ function normalizeAndPrepareGames(arr, shuffle = true) {
 
     loadGenreList(originalData);
     return out;
-  } catch (e) { console.warn('[GameHub] normalizeAndPrepareGames error', e && e.message); return []; }
+  } catch (e) { return []; }
 }
 
 // Load remote canonical JSON (GitHub raw or other raw URL) and prepare dataset
@@ -235,17 +424,19 @@ async function loadRemoteGameList(url) {
     if (!res.ok) throw new Error('failed to fetch remote game list: ' + res.status);
     const raw = await res.json();
     // raw may be object keyed by appid or array
-    const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+    let arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+    // Merge local overrides/additions
+    arr = await mergeWithLocalDataset(arr);
     const prepared = normalizeAndPrepareGames(arr, true);
     // persist the manual url so future visits load the same
     try { localStorage.setItem('gamehub_manual_raw', url); } catch (e) {}
 
     // Render first page from cache (pageCache was prepared)
-    try { await renderPage(1); } catch (e) { console.warn('[GameHub] renderPage after loadRemoteGameList failed', e && e.message); }
+    try { await renderPage(1); } catch (e) {}
     // start protection worker if any
     try { if (typeof startProtectionWorker === 'function') startProtectionWorker(); } catch (e) {}
     return prepared;
-  } catch (e) { console.warn('[GameHub] loadRemoteGameList failed', e && e.message); throw e; }
+  } catch (e) { throw e; }
 }
 
 // Expose helper for users to set raw URL at runtime
@@ -282,49 +473,63 @@ async function initGamesPage() {
   try { loadPageCache(); } catch(e) {}
   showSkeleton();
 
-  // Jika user sudah set URL RAW GitHub, muat langsung
+  // Raw-only init: muat daftar RAW GitHub sebagai data awal via desktop bridge
   try {
-    const manualUrl = window.GAMEHUB_RAW_URL || localStorage.getItem('gamehub_manual_raw');
-    if (manualUrl) {
-      try {
-        console.log('[GameHub] initGamesPage: loading manual game list from', manualUrl);
-        await loadRemoteGameList(manualUrl);
-        try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-        // We already rendered page 1 inside loader
-        return;
-      } catch (e) {
-        console.warn('[GameHub] loadRemoteGameList failed', e && e.message);
-      }
-    }
-  } catch (e) {}
+    // Default text (akan di-update berdasarkan source data)
+    let overlayText = 'Memuat seluruh game. Ini hanya terjadi saat pertama kali membuka/menghapus data aplikasi...';
+    let isFromCache = false;
+    
+    showBlockingOverlay(overlayText, { showProgress: true });
 
-  // Raw-only init: muat daftar RAW GitHub sebagai data awal
-  try {
-    const gh = await fetchGithubAppList();
-    if (Array.isArray(gh) && gh.length) {
-      // RAW lengkap: jika format berisi objek dengan field lengkap, normalisasi langsung.
-      originalData = gh.map(it => ({
-        appid: Number(it.appid || it.id || 0),
-        title: String(it.name || it.title || ''),
-        header: String(it.header || ''),
-        genre: it.genre || it.genre_display || '',
-        genre_display: it.genre_display || it.genre || '',
-        short_description: it.short_description || '',
-        developers: Array.isArray(it.developers) ? it.developers : (it.developers ? [String(it.developers)] : []),
-        publishers: Array.isArray(it.publishers) ? it.publishers : (it.publishers ? [String(it.publishers)] : []),
-        release_date: String(it.release_date || ''),
-        price_display: String(it.price_display || ''),
-        price_normalized: Number(it.price_normalized || 0),
-        price_initial: Number(it.price_initial || it.price_normalized || 0),
-        protection: it.protection === true ? true : false
-      }));
-      filteredData = originalData.slice();
-      loadGenreList(originalData);
-      await renderPage(1);
+    // Attempt to fetch full raw (via desktop bridge when available).
+    // Progress callback akan update overlay text berdasarkan source
+    const progressWrapper = (percent, message) => {
+      if (message) {
+        // Deteksi jika dari cache (cek dulu sebelum download)
+        if (message.includes('cache') || message.includes('memori') || 
+            message.includes('Data dimuat dari cache') || 
+            message.includes('Data dari memori') ||
+            message.includes('Memuat dari cache')) {
+          if (!isFromCache) {
+            isFromCache = true;
+            overlayText = 'Memuat seluruh games';
+            const textEl = document.getElementById('gamehub-block-overlay-text');
+            if (textEl) textEl.textContent = overlayText;
+          }
+        } else if (message.includes('download') || message.includes('Mengunduh') || 
+                   message.includes('Memulai download')) {
+          // Pastikan teks download ditampilkan
+          if (isFromCache) {
+            isFromCache = false;
+            overlayText = 'Memuat seluruh game. Ini hanya terjadi saat pertama kali membuka/menghapus data aplikasi...';
+            const textEl = document.getElementById('gamehub-block-overlay-text');
+            if (textEl) textEl.textContent = overlayText;
+          }
+        }
+      }
+      // Update progress
+      if (typeof updateBlockingOverlayProgress === 'function') {
+        updateBlockingOverlayProgress(percent, message);
+      }
+    };
+    
+    const full = await fetchGithubFullRaw(false, progressWrapper);
+    if (full && (Array.isArray(full) || (full && typeof full === 'object'))) {
+      let arr = Array.isArray(full) ? full : Object.values(full || {});
+      arr = await mergeWithLocalDataset(arr);
+      const prepared = normalizeAndPrepareGames(arr, true);
+      // Log sumber dataset ke AppLog (jelas bahwa ini dari bridge/disk)
+      try {
+        if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+          window.desktopBridge.send('AppLog', { message: '[UI] initGamesPage: dataset loaded via full raw (bridge/disk or download once)' });
+        }
+      } catch (e) {}
+      try { hideBlockingOverlay(); } catch (e) {}
+      try { await renderPage(1); } catch (e) {}
       try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
       return;
     }
-  } catch (e) { console.warn('[GameHub] initGamesPage GitHub raw init failed', e && e.message); }
+  } catch (e) {}
 
   // Fallback: try sample_page.json containing normalized objects
   try {
@@ -337,119 +542,48 @@ async function initGamesPage() {
       try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
       return;
     }
-  } catch (se) { console.warn('[GameHub] sample_page.json fallback failed', se && se.message); }
+  } catch (se) {}
 
-  // Penyegaran berkala data (12 jam)
-  try {
-    if (!window._gamehub_github_refresh_scheduled) {
-      window._gamehub_github_refresh_scheduled = true;
-      // Use the same TTL as fetchGithubAppList GITHUB_CACHE_TTL (12h)
-      const intervalMs = 12 * 60 * 60 * 1000;
-      setInterval(async () => {
-        try {
-          console.log('[GameHub] background fetchGithubAppList tick');
-          // fetch without forcing (uses conditional GET) to update local cache/meta
-          const beforeRaw = localStorage.getItem('gamehub_github_appids') || '[]';
-          let before = [];
-          try { before = JSON.parse(beforeRaw); } catch (e) { before = []; }
-          const updated = await fetchGithubAppList(false);
-          // Bandingkan dan tampilkan notifikasi singkat jika ada item baru
-          const beforeSet = new Set((before || []).map(x => Number(x.appid || x)).filter(Boolean));
-          const updatedSet = new Set((updated || []).map(x => Number(x.appid || x)).filter(Boolean));
-          const newCount = [...updatedSet].filter(id => !beforeSet.has(id)).length;
-          // Perbarui label "Terakhir diperbarui" setiap tick (fungsi didefinisikan di filter.js)
-          try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-          if (newCount > 0) {
-            // Pesan netral tanpa menyebut RAW atau tombol
-            showTransientMessage(`Data diperbarui: ${newCount} entri baru.`, 6000);
-          }
-        } catch (e) { console.warn('[GameHub] background refresh error', e && e.message); }
-      }, 12 * 60 * 60 * 1000);
-      // Trigger saat tab kembali aktif jika TTL lewat
-      document.addEventListener('visibilitychange', async () => {
-        try {
-          if (document.visibilityState === 'visible') {
-            const metaRaw = localStorage.getItem('gamehub_github_meta');
-            let meta = {};
-            try { meta = metaRaw ? JSON.parse(metaRaw) : {}; } catch(e) { meta = {}; }
-            const ts = meta && meta.ts ? meta.ts : 0;
-            if (Date.now() - ts > (12 * 60 * 60 * 1000)) {
-              console.log('[GameHub] visibility trigger fetchGithubAppList');
-              await fetchGithubAppList(false);
-              try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-            }
-          }
-        } catch (e) {}
-      });
-
-      // Trigger saat kembali online
-      window.addEventListener('online', async () => {
-        try {
-          console.log('[GameHub] online trigger fetchGithubAppList');
-          await fetchGithubAppList(false);
-          try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-        } catch (e) {}
-      });
-    }
-  } catch (e) { console.warn('[GameHub] schedule refresh failed', e && e.message); }
+  // Background refresh dihapus: semua data sekarang via bridge (disk cache), tidak perlu refresh berkala dari JS
 }
 
-// Handler refresh manual dihapus dari UI; fungsi dipertahankan jika dipanggil internal
+// Refresh manual: force reload dari bridge (disk cache akan di-update jika expired)
+// Juga digunakan setelah update override data untuk reload dataset dengan override baru
 async function refreshGithubRaw() {
   try {
-    showBlockingOverlay('Memeriksa pembaruan data...');
-    // read previous cache before forcing a fetch
-    const beforeRaw = localStorage.getItem('gamehub_github_appids') || '[]';
-    let before = [];
-    try { before = JSON.parse(beforeRaw); } catch (e) { before = []; }
-    const beforeSet = new Set((before || []).map(x => (x && x.appid) ? Number(x.appid) : Number(x)).filter(Boolean));
-
-    const updated = await fetchGithubAppList(true);
+    showBlockingOverlay('Memeriksa pembaruan data...', { showProgress: true });
+    // Force refresh via bridge (akan download jika cache expired)
+    // Tapi untuk override, kita tidak perlu force refresh raw data
+    // Cukup reload dengan override yang sudah ter-update
+    const full = await fetchGithubFullRaw(false); // false = gunakan cache, tapi override sudah ter-update
     hideBlockingOverlay();
-    if (!updated || !updated.length) {
+    if (!full || (!Array.isArray(full) && typeof full !== 'object')) {
       showTransientMessage('Data tidak tersedia.', 4000);
       return;
     }
-    const newItems = (updated || []).filter(it => !beforeSet.has(Number(it.appid)));
-    if (!newItems.length) {
-      showTransientMessage('Data sudah terbaru.', 4000);
-      return;
+    // Normalize dan update dataset (akan merge dengan override yang baru)
+    let arr = Array.isArray(full) ? full : Object.values(full || {});
+    arr = await mergeWithLocalDataset(arr); // Ini akan load override yang baru
+    const prepared = normalizeAndPrepareGames(arr, true);
+    
+    // Update global data
+    originalData = prepared;
+    filteredData = prepared;
+    
+    // Clear page cache
+    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+    
+    // Load genre list
+    if (typeof loadGenreList === 'function') {
+      loadGenreList(originalData);
     }
-    // Raw-only: gantikan dataset penuh dengan versi terbaru, lalu render
-    originalData = updated.map(it => ({
-      appid: Number(it.appid || it.id || 0),
-      title: String(it.name || it.title || ''),
-      header: String(it.header || ''),
-      genre: it.genre || it.genre_display || '',
-      genre_display: it.genre_display || it.genre || '',
-      short_description: it.short_description || '',
-      developers: Array.isArray(it.developers) ? it.developers : (it.developers ? [String(it.developers)] : []),
-      publishers: Array.isArray(it.publishers) ? it.publishers : (it.publishers ? [String(it.publishers)] : []),
-      release_date: String(it.release_date || ''),
-      price_display: String(it.price_display || ''),
-      price_normalized: Number(it.price_normalized || 0),
-      price_initial: Number(it.price_initial || it.price_normalized || 0),
-      protection: it.protection === true ? true : false
-    }));
-    filteredData = originalData.slice();
-    // rebuild pageCache untuk pagination stabil
-    try {
-      Object.keys(pageCache).forEach(k => delete pageCache[k]);
-      const total = Math.ceil(originalData.length / PAGE_SIZE) || 0;
-      for (let p = 1; p <= total; p++) {
-        const start = (p - 1) * PAGE_SIZE;
-        pageCache[p] = originalData.slice(start, start + PAGE_SIZE);
-      }
-      savePageCache();
-    } catch (e) {}
-    // Sinkronkan label setelah pembaruan manual
+    
     try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-    showTransientMessage(`Data diperbarui: ${newItems.length} entri baru.`, 6000);
-    try { renderPage(1); } catch (e) { console.warn('[GameHub] render after refresh failed', e && e.message); }
+    showTransientMessage('Data diperbarui.', 4000);
+    try { await renderPage(1); } catch (e) {}
   } catch (e) {
     hideBlockingOverlay();
-    console.warn('[GameHub] refreshGithubRaw error', e && e.message);
-    showTransientMessage('Gagal memuat pembaruan raw. Coba lagi nanti.', 5000);
+    showTransientMessage('Gagal memuat pembaruan. Coba lagi nanti.', 5000);
   }
 }
 
@@ -604,7 +738,7 @@ function renderGameCardHTML(game) {
            border border-white/5 transition">
 
     <div class="relative w-36 h-20 flex-shrink-0">
-       <img src="${game.header}" class="w-full h-full object-cover rounded-lg shadow"
+       <img src="${game.header || ''}" class="w-full h-full object-cover rounded-lg shadow"
          onerror="(function(img){img.onerror=null;img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';})(this);">
       <div class="absolute top-1 left-1 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow">
         ${premiumLabel}
@@ -666,7 +800,7 @@ function appendPlaceholderCard(list, meta) {
         </div>
       </div>`;
     list.insertAdjacentHTML('afterbegin', markup);
-  } catch (e) { console.warn('[GameHub] appendPlaceholderCard error', e && e.message); }
+  } catch (e) {}
 }
 
 function replacePlaceholderWithGame(appid, game) {
@@ -698,3 +832,91 @@ function replacePlaceholderWithGame(appid, game) {
     } catch (e) {}
   } catch (e) {}
 }
+
+// Clear UI cache only (ringan): tidak menyentuh dataset utama GitHub
+async function clearUiCacheOnly() {
+  try {
+    // Hapus page cache & detail cache di localStorage
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key === 'gamehub_page_cache' || key.startsWith('gamehub_detail_')) {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {}
+      }
+    }
+
+    // Reset cache di memori (supaya list dibangun ulang dari dataset yang sama)
+    originalData = [];
+    filteredData = [];
+    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+
+    showTransientMessage('Cache tampilan dihapus. Data utama tetap disimpan.', 3000);
+  } catch (e) {
+    showTransientMessage('Gagal menghapus cache tampilan.', 3000);
+  }
+}
+
+// Clear all cache (localStorage + disk cache via bridge) — berat, buat fresh seperti baru
+async function clearAllCache() {
+  try {
+    // Clear localStorage
+    const keysToRemove = [
+      'gamehub_page_cache',
+      'gamehub_manual_raw',
+      'gamehub_github_appids',
+      'gamehub_github_meta',
+      'gamehub_github_raw_full',
+      'gamehub_github_raw_full_meta',
+      'gamehub_built_appids',
+      'gamehub_remaining_appids'
+    ];
+    
+    // Remove all gamehub_detail_* keys
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('gamehub_detail_') || keysToRemove.includes(key))) {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {}
+      }
+    }
+    
+    // Clear in-memory cache
+    originalData = [];
+    filteredData = [];
+    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+    if (window._githubAppList) window._githubAppList = null;
+    if (window._genreMap) window._genreMap = null;
+    if (window._steamGenres) window._steamGenres = null;
+    if (window.GAMEHUB_RAW_URL) delete window.GAMEHUB_RAW_URL;
+    
+    // Clear disk cache via bridge
+    if (window.desktopBridge && typeof window.desktopBridge.clearAllCache === 'function') {
+      try {
+        const result = await window.desktopBridge.clearAllCache();
+        if (result && result.success) {
+          showTransientMessage('Semua data & cache dihapus. Aplikasi akan dimuat ulang...', 3000);
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          const errorMsg = result?.error || result?.message || 'Unknown error';
+          showTransientMessage('Sebagian cache dihapus. ' + errorMsg, 4000);
+        }
+      } catch (e) {
+        showTransientMessage('Cache localStorage dihapus. Restart aplikasi untuk menghapus cache disk.', 4000);
+      }
+    } else {
+      showTransientMessage('Cache localStorage dihapus. Restart aplikasi untuk menghapus cache disk.', 4000);
+    }
+  } catch (e) {
+    showTransientMessage('Gagal menghapus cache: ' + (e.message || 'Unknown error'), 4000);
+  }
+}
+
+// Expose globally for console access
+window.clearAllCache = clearAllCache;
+window.clearUiCacheOnly = clearUiCacheOnly;
+window.clearUiCacheOnly = clearUiCacheOnly;

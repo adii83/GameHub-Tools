@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GameHubDesktop</RootNamespace>
+    <ApplicationIcon>Assets\gamehub.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2521.47" />
+    <PackageReference Include="SharpCompress" Version="0.37.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\gamehub.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\public\index.html" Condition="Exists('..\\..\\public\\index.html')" />
+    <None Include="..\..\public\tailwind.css" Condition="Exists('..\\..\\public\\tailwind.css')" />
+    <None Include="..\..\public\app\**\*" Condition="Exists('..\\..\\public\\app')" />
+    <None Include="..\..\public\components\**\*" Condition="Exists('..\\..\\public\\components')" />
+    <None Include="..\..\public\data\**\*" Condition="Exists('..\\..\\public\\data')" />
+    <None Include="..\..\js\**\*" Condition="Exists('..\\..\\js')" />
+  </ItemGroup>
+</Project>
