@@ -32,8 +32,33 @@ Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
 *.iml
+# Note: *.sln files are usually committed (removed from ignore)
+
+# C# .NET Build outputs
+[Bb]in/
+[Oo]bj/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+
+# WebView2 runtime files (very large, generated at runtime)
+**/GameHubDesktop.exe.WebView2/
+**/EBWebView/
+
+# Visual Studio files
+.vs/
+*.vsidx
+*.vspscc
+*.vsp
+*.vsscc
+*.vssscc
 
 # Temporary files
 tmp/
@@ -43,8 +68,6 @@ temp/
 # Coverage
 coverage/
 .nyc_output/
-
-# (proxy removed)
 
 # Misc
 *.localstorage
