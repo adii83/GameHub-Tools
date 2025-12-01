@@ -250,6 +250,49 @@
         api.send('GetUserOverride', {});
       });
     },
+    // Get list of AppIDs from installed games (from steam\config\stplug-in\*.lua files)
+    async getLibraryAppIds() {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          reject(new Error('getLibraryAppIds timeout'));
+        }, 10000);
+        
+        let resolved = false;
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            
+            if (data?.type === 'LibraryAppIds') {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                try {
+                  window.chrome.webview.removeEventListener('message', handler);
+                } catch (e) {}
+                resolve(data.appids || []);
+              }
+            }
+          } catch (e) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try {
+                window.chrome.webview.removeEventListener('message', handler);
+              } catch (err) {}
+              reject(e);
+            }
+          }
+        };
+        
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetLibraryAppIds', {});
+      });
+    },
     // Check for override data update
     async checkOverrideUpdate() {
       return new Promise((resolve, reject) => {
@@ -334,6 +377,62 @@
         
         window.chrome.webview.addEventListener('message', handler);
         api.send('ForceUpdateOverride', {});
+      });
+    },
+    // Get license info
+    async getLicenseInfo() {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        let resolved = false;
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            try {
+              window.chrome.webview.removeEventListener('message', handler);
+            } catch (e) {}
+            reject(new Error('getLicenseInfo timeout'));
+          }
+        }, 10000);
+        
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            
+            if (data?.type === 'LicenseInfo') {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                try {
+                  window.chrome.webview.removeEventListener('message', handler);
+                } catch (e) {}
+                resolve({
+                  plan: data.plan || 'standard',
+                  isActive: data.isActive || false,
+                  isValid: data.isValid || false,
+                  licenseKey: data.licenseKey || '',
+                  deviceId: data.deviceId || '',
+                  errorMessage: data.errorMessage || ''
+                });
+              }
+            }
+          } catch (e) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try {
+                window.chrome.webview.removeEventListener('message', handler);
+              } catch (err) {}
+              reject(e);
+            }
+          }
+        };
+        
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetLicenseInfo', {});
       });
     }
   };

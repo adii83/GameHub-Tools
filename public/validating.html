@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameHub - Memvalidasi License</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .spinner {
+            border: 4px solid rgba(59, 130, 246, 0.2);
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .pulse-text {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-neutral-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-8 w-full max-w-md border border-white/10 text-center">
+        <div class="spinner mb-6" id="spinner"></div>
+        <h2 class="text-2xl font-bold text-white mb-2" id="title">Memvalidasi License</h2>
+        <p class="text-gray-400 pulse-text" id="statusText">Memeriksa status license Anda...</p>
+        <p class="text-gray-500 text-sm mt-4" id="timeoutMessage" style="display: none;">
+            Proses validasi memakan waktu lebih lama dari biasanya.<br>
+            Pastikan koneksi internet Anda stabil.
+        </p>
+        
+        <!-- Debug Logs Container -->
+        <div id="debugLogs" class="mt-6 text-left bg-black/30 rounded-lg p-3 max-h-48 overflow-y-auto" style="display: none; font-family: monospace; font-size: 11px;">
+            <div class="text-gray-400 text-xs mb-2 font-semibold">Debug Logs:</div>
+            <div id="debugLogsContent" class="space-y-1 text-gray-300"></div>
+        </div>
+        <button onclick="toggleDebugLogs()" class="mt-2 text-xs text-gray-500 hover:text-gray-300">Toggle Debug Logs</button>
+    </div>
+    
+    <script>
+        // Store original console methods
+        const originalConsoleLog = console.log.bind(console);
+        const originalConsoleError = console.error.bind(console);
+        const originalConsoleWarn = console.warn.bind(console);
+        
+        // Debug logs container untuk UI (opsional)
+        const debugLogsContent = document.getElementById('debugLogsContent');
+        const debugLogs = document.getElementById('debugLogs');
+        let logCount = 0;
+        
+        function addLogToPage(message, type = 'log') {
+            if (!debugLogsContent) return;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type === 'error' ? 'text-red-400' : type === 'warn' ? 'text-yellow-400' : 'text-gray-300';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            debugLogsContent.appendChild(logEntry);
+            logCount++;
+            
+            // Keep only last 50 logs
+            if (logCount > 50) {
+                debugLogsContent.removeChild(debugLogsContent.firstChild);
+                logCount--;
+            }
+            
+            // Auto-scroll to bottom
+            if (debugLogs) {
+                debugLogs.scrollTop = debugLogs.scrollHeight;
+            }
+        }
+        
+        // Override console.log - tetap panggil original agar muncul di DevTools
+        console.log = function(...args) {
+            // Panggil original console.log (akan muncul di DevTools)
+            originalConsoleLog.apply(console, args);
+            
+            // Juga tampilkan di UI (opsional)
+            const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+            addLogToPage(message, 'log');
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+            addLogToPage(message, 'error');
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+            addLogToPage(message, 'warn');
+        };
+        
+        function toggleDebugLogs() {
+            if (debugLogs) {
+                if (debugLogs.style.display === 'none' || !debugLogs.style.display) {
+                    debugLogs.style.display = 'block';
+                } else {
+                    debugLogs.style.display = 'none';
+                }
+            }
+        }
+        
+        // Expose toggle function globally
+        window.toggleDebugLogs = toggleDebugLogs;
+        
+        // Check URL parameter untuk error
+        const urlParams = new URLSearchParams(window.location.search);
+        const error = urlParams.get('error');
+        
+        // Listen for messages from C# that should be logged to console
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener('message', (event) => {
+                try {
+                    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                    if (data && data.type === 'ConsoleLog') {
+                        console.log(data.message || data.text || JSON.stringify(data));
+                    }
+                } catch (e) {
+                    console.error('Error parsing console log message:', e);
+                }
+            });
+        }
+        
+        if (error === 'timeout') {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = '⚠️ Validasi Timeout';
+            document.getElementById('title').className = 'text-2xl font-bold text-red-400 mb-2';
+            document.getElementById('statusText').textContent = 'Proses validasi memakan waktu terlalu lama (>10 detik).';
+            document.getElementById('statusText').className = 'text-red-300 mb-4';
+            
+            // Tampilkan pesan timeout
+            const timeoutMsg = document.getElementById('timeoutMessage');
+            timeoutMsg.style.display = 'block';
+            timeoutMsg.className = 'text-red-300 text-sm mt-4';
+            timeoutMsg.innerHTML = `
+                <strong>Silakan:</strong><br>
+                1. Tutup aplikasi ini<br>
+                2. Pastikan koneksi internet Anda stabil dan lancar<br>
+                3. Buka aplikasi lagi<br><br>
+                <button onclick="window.location.href='activate.html'" 
+                    style="padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;margin-top:12px;">
+                    Tutup Aplikasi
+                </button>
+            `;
+        } else if (error === 'network') {
+            document.getElementById('spinner').style.display = 'none';
+            document.getElementById('title').textContent = '⚠️ Gagal Validasi';
+            document.getElementById('title').className = 'text-2xl font-bold text-yellow-400 mb-2';
+            document.getElementById('statusText').textContent = 'Gagal memvalidasi license.';
+            document.getElementById('statusText').className = 'text-yellow-300 mb-4';
+            
+            // Tampilkan pesan error
+            const timeoutMsg = document.getElementById('timeoutMessage');
+            timeoutMsg.style.display = 'block';
+            timeoutMsg.className = 'text-yellow-300 text-sm mt-4';
+            timeoutMsg.innerHTML = `
+                Kemungkinan masalah:<br>
+                • Koneksi internet tidak stabil<br>
+                • Server sedang maintenance<br>
+                • License telah dihapus atau dibanned<br><br>
+                <strong>Silakan:</strong><br>
+                1. Tutup aplikasi ini<br>
+                2. Pastikan koneksi internet Anda stabil<br>
+                3. Buka aplikasi lagi untuk aktivasi ulang<br><br>
+                <button onclick="window.location.href='activate.html'" 
+                    style="padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;margin-top:12px;">
+                    Aktivasi Ulang
+                </button>
+            `;
+        } else {
+            // Normal loading - tampilkan timeout warning setelah 8 detik
+            setTimeout(() => {
+                const timeoutMsg = document.getElementById('timeoutMessage');
+                if (timeoutMsg) {
+                    timeoutMsg.style.display = 'block';
+                }
+            }, 8000);
+        }
+    </script>
+</body>
+</html>
+

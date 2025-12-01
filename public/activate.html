@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameHub - Aktivasi License</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .spinner {
+            border: 3px solid rgba(59, 130, 246, 0.2);
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .pulse-text {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-neutral-800/90 backdrop-blur-sm rounded-2xl shadow-2xl p-8 w-full max-w-md fade-in border border-white/10">
+        <div class="text-center mb-8">
+            <div class="text-6xl mb-4">🎮</div>
+            <h1 class="text-3xl font-bold text-white mb-2">GameHub</h1>
+            <p class="text-gray-400">Masukkan License Key Anda</p>
+        </div>
+
+        <form id="activateForm" class="space-y-6 transition-opacity duration-300">
+            <div>
+                <label for="licenseKey" class="block text-sm font-medium text-gray-300 mb-2">
+                    License Key
+                </label>
+                <input 
+                    type="text" 
+                    id="licenseKey" 
+                    name="licenseKey"
+                    placeholder="Masukkan license key Anda"
+                    class="w-full px-4 py-3 bg-neutral-700/50 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    required
+                    autocomplete="off"
+                />
+            </div>
+
+            <div id="errorMessage" class="hidden bg-red-500/20 border border-red-500/50 rounded-lg p-3 text-red-300 text-sm">
+                <div class="flex items-start gap-2">
+                    <span class="text-red-400 text-lg">⚠️</span>
+                    <div class="flex-1">
+                        <div id="errorMessageText"></div>
+                        <div id="errorMessageDetail" class="mt-2 text-xs text-red-400/80 hidden"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="successMessage" class="hidden bg-green-500/20 border border-green-500/50 rounded-lg p-3 text-green-300 text-sm"></div>
+            
+            <!-- Success State dengan Spinner -->
+            <div id="successState" class="hidden fade-in">
+                <div class="text-center space-y-6 py-8">
+                    <div class="spinner"></div>
+                    <div class="space-y-2">
+                        <p class="text-green-400 font-semibold text-xl">✅ License berhasil diaktivasi!</p>
+                        <p class="text-gray-400 text-sm pulse-text">Memuat aplikasi, mohon tunggu...</p>
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                type="submit" 
+                id="activateBtn"
+                class="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold py-3 px-4 rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+                <span id="activateBtnText">Aktivasi</span>
+            </button>
+        </form>
+
+        <div class="mt-6 pt-6 border-t border-white/10 text-center">
+            <p class="text-xs text-gray-500">
+                License key Anda akan terikat dengan perangkat ini.<br>
+                Satu license key hanya bisa digunakan di satu perangkat.
+            </p>
+        </div>
+    </div>
+
+    <script src="js/bridge.js"></script>
+    <script>
+        // Wait for bridge to be ready
+        function waitForBridge(callback) {
+            if (window.desktopBridge) {
+                callback();
+            } else {
+                setTimeout(() => waitForBridge(callback), 100);
+            }
+        }
+
+        waitForBridge(() => {
+            const form = document.getElementById('activateForm');
+            const licenseKeyInput = document.getElementById('licenseKey');
+            const activateBtn = document.getElementById('activateBtn');
+            const activateBtnText = document.getElementById('activateBtnText');
+            const errorMessage = document.getElementById('errorMessage');
+            const successMessage = document.getElementById('successMessage');
+
+            // Listen for activation result from WebView2
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.addEventListener('message', (event) => {
+                    try {
+                        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                        if (data.type === 'LicenseActivationResult' || data.type === 'ActivateLicenseResult') {
+                            // Hide spinner dan enable button
+                            activateBtn.disabled = false;
+                            activateBtnText.textContent = 'Aktivasi';
+                            
+                            // Hide spinner jika ada
+                            const spinner = document.querySelector('.spinner');
+                            if (spinner) {
+                                spinner.style.display = 'none';
+                            }
+
+                            if (data.success) {
+                                // Sembunyikan form dan error message dengan fade out
+                                errorMessage.classList.add('hidden');
+                                successMessage.classList.add('hidden');
+                                form.style.opacity = '0';
+                                form.style.transition = 'opacity 0.3s ease-out';
+                                
+                                setTimeout(() => {
+                                    form.style.display = 'none';
+                                    
+                                    // Tampilkan success state dengan spinner dan fade in
+                                    const successState = document.getElementById('successState');
+                                    if (successState) {
+                                        successState.classList.remove('hidden');
+                                        successState.style.opacity = '0';
+                                        successState.style.transition = 'opacity 0.3s ease-in';
+                                        // Trigger reflow untuk animasi
+                                        void successState.offsetWidth;
+                                        successState.style.opacity = '1';
+                                    }
+                                }, 100);
+                                
+                                // Biarkan spinner tetap muncul selama 3 detik untuk efek premium
+                                // Reload aplikasi setelah 3 detik
+                                setTimeout(() => {
+                                    window.location.href = 'index.html';
+                                }, 3000);
+                            } else {
+                                successMessage.classList.add('hidden');
+                                
+                                // Parse error message dari backend
+                                const errorText = data.error || data.message || 'Aktivasi gagal. Periksa license key Anda.';
+                                const errorTextLower = errorText.toLowerCase();
+                                
+                                // Deteksi status error berdasarkan message atau flag dari backend
+                                const isBanned = data.isBanned === true || 
+                                    errorTextLower.includes('banned') || 
+                                    errorTextLower.includes('dibanned');
+                                
+                                const isNotFound = data.isNotFound === true ||
+                                    errorTextLower.includes('tidak ditemukan') || 
+                                    errorTextLower.includes('not_found') ||
+                                    errorTextLower.includes('not found');
+                                
+                                const isWrongDevice = data.isWrongDevice === true ||
+                                    errorTextLower.includes('perangkat lain') || 
+                                    errorTextLower.includes('wrong_device') ||
+                                    errorTextLower.includes('device berbeda');
+                                
+                                // Update error message dengan pesan yang sesuai
+                                const errorMessageText = document.getElementById('errorMessageText');
+                                const errorMessageDetail = document.getElementById('errorMessageDetail');
+                                
+                                let displayMessage = errorText;
+                                let detailMessage = '';
+                                
+                                if (isBanned) {
+                                    displayMessage = 'LicenseKey dibanned. Silakan hubungi admin untuk bantuan lebih lanjut.';
+                                    detailMessage = 'Jika Anda yakin license key Anda valid, silakan hubungi admin untuk bantuan.';
+                                } else if (isNotFound) {
+                                    displayMessage = 'LicenseKey tidak ditemukan. Periksa kembali license key Anda.';
+                                    detailMessage = 'Pastikan license key yang Anda masukkan benar dan belum digunakan sebelumnya.';
+                                } else if (isWrongDevice) {
+                                    displayMessage = 'LicenseKey sudah digunakan di perangkat lain. Satu license key hanya bisa digunakan di satu perangkat.';
+                                    detailMessage = 'Jika Anda ingin menggunakan license key ini di perangkat ini, silakan hubungi admin untuk reset license.';
+                                }
+                                
+                                if (errorMessageText) {
+                                    errorMessageText.textContent = displayMessage;
+                                } else {
+                                    // Fallback jika element tidak ada
+                                    errorMessage.innerHTML = `<div class="flex items-start gap-2">
+                                        <span class="text-red-400 text-lg">⚠️</span>
+                                        <div class="flex-1">${displayMessage}</div>
+                                    </div>`;
+                                }
+                                
+                                // Tampilkan detail jika ada
+                                if (detailMessage && errorMessageDetail) {
+                                    errorMessageDetail.textContent = detailMessage;
+                                    errorMessageDetail.classList.remove('hidden');
+                                } else if (errorMessageDetail) {
+                                    errorMessageDetail.classList.add('hidden');
+                                }
+                                
+                                errorMessage.classList.remove('hidden');
+                                
+                                // Clear input jika banned atau wrong device untuk mencegah retry yang tidak perlu
+                                if (isBanned || isWrongDevice) {
+                                    licenseKeyInput.value = '';
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                    }
+                });
+            }
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const licenseKey = licenseKeyInput.value.trim();
+                if (!licenseKey) {
+                    const errorMessageText = document.getElementById('errorMessageText');
+                    if (errorMessageText) {
+                        errorMessageText.textContent = 'License key tidak boleh kosong';
+                    } else {
+                        errorMessage.innerHTML = '<div class="flex items-start gap-2"><span class="text-red-400 text-lg">⚠️</span><div class="flex-1">License key tidak boleh kosong</div></div>';
+                    }
+                    errorMessage.classList.remove('hidden');
+                    return;
+                }
+
+                activateBtn.disabled = true;
+                activateBtnText.textContent = 'Mengaktivasi...';
+                errorMessage.classList.add('hidden');
+                successMessage.classList.add('hidden');
+                
+                // Hide error detail saat submit baru
+                const errorMessageDetail = document.getElementById('errorMessageDetail');
+                if (errorMessageDetail) {
+                    errorMessageDetail.classList.add('hidden');
+                }
+
+                try {
+                    if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+                        // Gunakan async/await untuk mencegah freeze
+                        window.desktopBridge.send('ActivateLicense', { licenseKey });
+                        // Response akan di-handle oleh event listener di atas
+                    } else {
+                        throw new Error('Bridge tidak tersedia');
+                    }
+                } catch (error) {
+                    activateBtn.disabled = false;
+                    activateBtnText.textContent = 'Aktivasi';
+                    
+                    const errorMessageText = document.getElementById('errorMessageText');
+                    if (errorMessageText) {
+                        errorMessageText.textContent = 'Error: ' + error.message;
+                    } else {
+                        errorMessage.innerHTML = `<div class="flex items-start gap-2"><span class="text-red-400 text-lg">⚠️</span><div class="flex-1">Error: ${error.message}</div></div>`;
+                    }
+                    errorMessage.classList.remove('hidden');
+                }
+            });
+
+            // Focus on input
+            licenseKeyInput.focus();
+        });
+    </script>
+</body>
+</html>
+

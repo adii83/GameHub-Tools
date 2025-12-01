@@ -236,6 +236,14 @@ function showUnfixSuccessPopup(appid, filesRemoved) {
 
 
 async function openDetail(appid) {
+  // Helper untuk menentukan apakah game premium atau standard
+  function isGamePremium(gameData) {
+    if (!gameData) return false;
+    const PREMIUM_MIN = 350000; // Threshold untuk premium game
+    const price = gameData.price_normalized || gameData.price_initial || 0;
+    return price >= PREMIUM_MIN;
+  }
+
   // Helper logging sumber data ke AppLog (desktop)
   function logDetailSource(source) {
     try {
@@ -245,10 +253,43 @@ async function openDetail(appid) {
     } catch (e) {}
   }
 
+  // Helper: Merge dengan override terbaru (untuk memastikan override selalu diterapkan)
+  async function mergeWithLatestOverride(gameData) {
+    if (!gameData) return gameData;
+    
+    try {
+      // Load override terbaru
+      const overrideMap = await loadLocalSteamData();
+      if (overrideMap && overrideMap.has(Number(appid))) {
+        const overrideData = overrideMap.get(Number(appid));
+        // Apply override menggunakan fungsi yang sama dengan mergeWithLocalDataset
+        if (typeof applyLocalOverridesToItem === 'function') {
+          return applyLocalOverridesToItem(gameData, overrideData);
+        } else {
+          // Fallback: manual merge
+          const merged = Object.assign({}, gameData);
+          const keys = ['title','header','genre','genre_display','short_description',
+            'developers','publishers','release_date','price_display','price_normalized','price_initial','protection','last_update'];
+          for (const k of keys) {
+            if (Object.prototype.hasOwnProperty.call(overrideData, k)) {
+              merged[k] = overrideData[k];
+            }
+          }
+          return merged;
+        }
+      }
+    } catch (e) {
+      // Jika error, return data asli
+    }
+    return gameData;
+  }
+
   // Cari di originalData (dataset utama)
   let g = (window.originalData||[]).find((x) => x.appid === appid);
   if (g) {
     logDetailSource('originalData');
+    // IMPORTANT: Merge dengan override terbaru sebelum digunakan
+    g = await mergeWithLatestOverride(g);
   }
   // Jika tidak ada, coba fetch dari local_data_steam.json (built-in)
   if (!g) {
@@ -257,6 +298,8 @@ async function openDetail(appid) {
       if (local && local[appid]) {
         g = Object.assign({appid: Number(appid)}, local[appid]);
         logDetailSource('local_data_steam');
+        // Merge dengan override terbaru
+        g = await mergeWithLatestOverride(g);
       }
     } catch(e) { g = null; }
   }
@@ -304,13 +347,53 @@ async function openDetail(appid) {
               g = Object.assign({appid: Number(appid)}, local[appid], g);
             }
           } catch (e) {}
+          // Merge dengan override terbaru
+          g = await mergeWithLatestOverride(g);
         }
       }
     } catch (e) {}
     if (!g) {
-      alert('Data game tidak ditemukan.');
+      premiumAlert('Data game tidak ditemukan.', 'Game Tidak Ditemukan');
       return;
     }
+  }
+
+  // Check license setelah mendapatkan game data
+  try {
+    if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+      const licenseInfo = await window.desktopBridge.getLicenseInfo();
+      
+      // Jika license tidak valid atau tidak aktif, block semua
+      if (!licenseInfo.isValid || !licenseInfo.isActive) {
+        premiumAlert(
+          'License tidak valid. Silakan aktivasi license terlebih dahulu.',
+          'License Tidak Valid'
+        );
+        return;
+      }
+      
+      // Jika plan adalah "standard", cek apakah game premium
+      if (licenseInfo.plan === 'standard') {
+        const PREMIUM_MIN = 350000; // Threshold untuk premium game
+        const price = g.price_normalized || g.price_initial || 0;
+        const gameIsPremium = price >= PREMIUM_MIN;
+        
+        // Jika game premium, block untuk plan standard
+        if (gameIsPremium) {
+          premiumAlert(
+            'Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁',
+            'Fitur Premium'
+          );
+          return; // Jangan buka modal detail
+        }
+        // Jika game standard, lanjutkan (allow)
+      }
+      
+      // Plan premium: allow semua game (tidak perlu cek)
+    }
+  } catch (e) {
+    // Jika error, tetap lanjutkan (fallback untuk development)
+    console.warn('License check error:', e);
   }
 
   const drawer = document.getElementById('detail-drawer');
@@ -849,11 +932,124 @@ function onRestartSteam() {
     const btn = document.getElementById('btn-restart-steam');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Merestart Steam...';
+      btn.innerHTML = '🔄 Merestart Steam...';
     }
   } catch (e) {}
-  window.desktopBridge?.send('RestartSteam', {});
+  if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+    window.desktopBridge.send('RestartSteam', {});
+  } else {
+    if (typeof showTransientMessage === 'function') {
+      showTransientMessage('Bridge tidak tersedia', 3000, 'error');
+    }
+    const btn = document.getElementById('btn-restart-steam');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '🔄 Restart Steam';
+    }
+  }
 }
+
+// Premium animation for removing game card
+// Hide card instead of removing immediately (will be cleaned up when returning to library page)
+function animateRemoveGameCard(appid, skipPopup = false) {
+  try {
+    const cardWrapper = document.getElementById(`game-card-wrapper-${appid}`);
+    const card = document.getElementById(`game-${appid}`);
+    if (!card && !cardWrapper) return;
+    
+    const target = cardWrapper || card;
+    
+    // Mark as hidden
+    if (window.hiddenCards) {
+      window.hiddenCards.add(String(appid));
+    }
+    
+    // Add premium animation
+    target.style.transition = 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)';
+    target.style.opacity = '0';
+    target.style.transform = 'translateX(-100%) scale(0.8)';
+    target.style.filter = 'blur(8px)';
+    target.style.pointerEvents = 'none';
+    
+    // Hide after animation (don't remove from DOM yet)
+    setTimeout(() => {
+      if (target) {
+        target.style.display = 'none';
+      }
+    }, 500);
+    
+    // Don't update data or re-render immediately - wait until library page reload
+    // This prevents the card from reappearing
+  } catch (e) {
+    // Fallback: just hide the card
+    const cardWrapper = document.getElementById(`game-card-wrapper-${appid}`);
+    const card = document.getElementById(`game-${appid}`);
+    const target = cardWrapper || card;
+    if (target) {
+      target.style.display = 'none';
+      if (window.hiddenCards) {
+        window.hiddenCards.add(String(appid));
+      }
+    }
+  }
+}
+
+// Handle trash button click (direct remove without modal)
+async function handleTrashClick(appid, gameTitle) {
+  try {
+    if (!window.desktopBridge || typeof window.desktopBridge.send !== 'function') {
+      if (typeof showPremiumToast === 'function') {
+        showPremiumToast('Bridge tidak tersedia', 3000, 'error');
+      }
+      return;
+    }
+    
+    // Confirm with premium modal (non-blocking)
+    if (typeof premiumConfirm === 'function') {
+      const confirmed = await premiumConfirm(
+        `Hapus "${gameTitle}" dari Library?`,
+        'Hapus Game'
+      );
+      if (!confirmed) return;
+    }
+    
+    // Set flag to skip popup
+    window._skipRemovePopup = true;
+    window._gh_current_appid = String(appid);
+    
+    // Show progress overlay
+    showProgressOverlay(`Menghapus untuk AppID ${appid}...`);
+    
+    // DON'T hide card yet - wait for success result
+    // Card will be hidden in RemoveGameResult handler only if success = true
+    
+    // Send remove request
+    window.desktopBridge.send('RemoveGame', { appid: String(appid) });
+  } catch (e) {
+    // Restore card on error
+    const cardWrapper = document.getElementById(`game-card-wrapper-${appid}`);
+    const card = document.getElementById(`game-${appid}`);
+    const target = cardWrapper || card;
+    if (target) {
+      target.style.display = '';
+      target.style.opacity = '1';
+      target.style.transform = '';
+      target.style.filter = '';
+      target.style.pointerEvents = '';
+      target.style.transition = '';
+      if (window.hiddenCards) {
+        window.hiddenCards.delete(String(appid));
+      }
+    }
+    
+    if (typeof showPremiumToast === 'function') {
+      showPremiumToast('Error: ' + (e.message || 'Unknown error'), 4000, 'error');
+    }
+  }
+}
+
+// Expose globally
+window.handleTrashClick = handleTrashClick;
 
 // Listen results from desktop
 (function setupDesktopBridgeListener(){
@@ -969,34 +1165,25 @@ function onRestartSteam() {
             }
           }
           if (msg.success) setTimeout(() => hideProgressOverlay(), 900);
-        } else if (msg.type === 'RemoveGameResult') {
-          if (msg.installed === true) {
-            // Diblokir karena game terinstal di Steam
-            hideProgressOverlay();
-            showRemoveBlockedPopup();
-          } else if (msg.success) {
-            updateProgressOverlay({ phase: 'Selesai', percent: 100, status: 'Berhasil dihapus' });
-            if (window._gh_current_appid) updateAddRemoveButton(String(window._gh_current_appid), false);
-            // Tampilkan popup sukses dengan tombol kembali
-            hideProgressOverlay();
-            showRemoveSuccessPopup(msg.removed || 0);
-          } else {
-            updateProgressOverlay({ phase: 'Gagal', percent: 0, status: String(msg.error || 'Gagal hapus') });
-          }
-          // Overlay ditutup di cabang masing-masing
         } else if (msg.type === 'GameInstalledState') {
           updateAddRemoveButton(String(msg.appid), !!msg.installed);
         } else if (msg.type === 'RestartSteamResult') {
-          // Restore button state and optionally show a short status
+          // Restore button state and show status
           try {
             const btn = document.getElementById('btn-restart-steam');
             if (btn) {
               btn.disabled = false;
-              btn.textContent = 'Restart Steam';
+              btn.innerHTML = '🔄 Restart Steam';
             }
           } catch (e) {}
           if (msg.success) {
-            // Optional: brief toast could be added here
+            if (typeof showTransientMessage === 'function') {
+              showTransientMessage('Steam berhasil direstart', 3000, 'success');
+            }
+          } else {
+            if (typeof showTransientMessage === 'function') {
+              showTransientMessage('Gagal restart Steam: ' + (msg.error || 'Unknown error'), 4000, 'error');
+            }
           }
         } else if (msg.type === 'OnlineFixAppliedState') {
           const applied = !!msg.applied;
@@ -1028,6 +1215,74 @@ function onRestartSteam() {
               updateBlockingOverlayProgress(msg.percent || 0, msg.message || null);
             }
           } catch (e) {}
+        } else if (msg.type === 'RemoveGameResult') {
+          // Handle remove game result
+          try {
+            const appid = String(msg.appid || window._gh_current_appid || '');
+            const skipPopup = window._skipRemovePopup === true;
+            
+            // Check if we're on Library page
+            const isLibraryPage = window.libraryFilterActive === true || 
+              (document.querySelector('h1')?.textContent?.trim() === 'Library Games');
+            
+            // Clear flag
+            window._skipRemovePopup = false;
+            
+            if (msg.success) {
+              // SUCCESS: Hide progress overlay
+              hideProgressOverlay();
+              
+              // Only hide card if we're on Library page (both trash button and modal detail)
+              if (isLibraryPage && typeof animateRemoveGameCard === 'function') {
+                // Hide card with animation (only on Library page)
+                animateRemoveGameCard(appid, skipPopup);
+              }
+              
+              // Show success message (only if not from trash button)
+              if (!skipPopup) {
+                if (typeof showPremiumToast === 'function') {
+                  showPremiumToast('Game berhasil dihapus', 3000, 'success');
+                }
+              }
+              // If from trash button, no popup needed (card disappearing is the feedback)
+              
+              // Update button state
+              if (typeof updateAddRemoveButton === 'function') {
+                updateAddRemoveButton(appid, false);
+              }
+            } else {
+              // ERROR: Remove failed - DO NOT hide card
+              hideProgressOverlay();
+              
+              // Restore card visibility if it was already hidden (shouldn't happen, but safety check)
+              const cardWrapper = document.getElementById(`game-card-wrapper-${appid}`);
+              const card = document.getElementById(`game-${appid}`);
+              const target = cardWrapper || card;
+              if (target) {
+                // Ensure card is visible (restore if hidden)
+                if (target.style.display === 'none' || window.hiddenCards?.has(String(appid))) {
+                  target.style.display = '';
+                  target.style.opacity = '1';
+                  target.style.transform = '';
+                  target.style.filter = '';
+                  target.style.pointerEvents = '';
+                  target.style.transition = '';
+                  // Remove from hiddenCards
+                  if (window.hiddenCards) {
+                    window.hiddenCards.delete(String(appid));
+                  }
+                }
+              }
+              
+              // Show error message
+              const errorMsg = msg.error || 'Gagal menghapus game';
+              if (typeof showPremiumToast === 'function') {
+                showPremiumToast(errorMsg, 4000, 'error');
+              }
+            }
+          } catch (e) {
+            console.error('Error handling RemoveGameResult:', e);
+          }
         } else if (msg.type === 'ClearAllCacheResult') {
           // Handle clear cache result - forward to any waiting promises
           try {

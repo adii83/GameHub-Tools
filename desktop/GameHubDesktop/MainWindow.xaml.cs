@@ -27,6 +27,12 @@ namespace GameHubDesktop
             try
             {
                 _appLog.Append("App start");
+                
+                // Initialize License Service
+                Services.LicenseService.Log = (msg) => _appLog.Append(msg);
+                
+                var license = Services.LicenseService.LoadLicense();
+                
                 // Load persisted applied state
                 Services.AppliedStateStore.Initialize();
                 // Initialize GitHub Raw Service
@@ -63,10 +69,109 @@ namespace GameHubDesktop
 
                 WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     "app.local", appRoot, CoreWebView2HostResourceAccessKind.Allow);
-                WebView.Source = new Uri("https://app.local/index.html");
-
+                
+                // Setup WebMessageReceived handler SEBELUM navigasi
                 WebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                
+                // Check license sebelum load aplikasi
+                if (!license.IsValid || !license.IsActive)
+                {
+                    // License tidak valid - clear cache dan load halaman aktivasi
+                    Services.LicenseService.ClearCache();
+                    WebView.Source = new Uri("https://app.local/activate.html");
+                    _appLog.Append("License tidak valid - menampilkan halaman aktivasi");
+                }
+                else
+                {
+                    // License valid offline - tampilkan halaman validating dulu
+                    _appLog.Append($"License valid offline - Plan={license.Plan}, loading validating page...");
+                    WebView.Source = new Uri("https://app.local/validating.html");
+                    
+                    // Tunggu WebView siap dulu sebelum mulai validasi (agar spinner terlihat)
+                    _appLog.Append("Waiting 500ms for WebView to be ready...");
+                    await Task.Delay(500);
+                    
+                    // Inject console.log helper ke validating.html
+                    try
+                    {
+                        await WebView.CoreWebView2.ExecuteScriptAsync(@"
+                            window.logToConsole = function(msg) {
+                                console.log('[VALIDATING]', msg);
+                            };
+                        ");
+                    }
+                    catch { }
+                    
+                    // Validasi online WAJIB saat app start (jika ada internet)
+                    // Jalankan di background thread agar tidak blocking UI
+                    _appLog.Append("Starting online validation in background thread...");
+                    var validationStartTime = DateTime.Now;
+                    
+                    // Jalankan validasi di background thread
+                    var validationTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            _appLog.Append("[Background] ValidateOnlineAsync starting...");
+                            return await Services.LicenseService.ValidateOnlineAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"[Background] ValidateOnlineAsync exception: {ex.GetType().Name} - {ex.Message}");
+                            throw;
+                        }
+                    });
+                    
+                    try
+                    {
+                        var validatedLicense = await validationTask;
+                        var validationElapsed = (DateTime.Now - validationStartTime).TotalSeconds;
+                        _appLog.Append($"Online validation completed in {validationElapsed:F2}s");
+                        
+                        if (!validatedLicense.IsActive || !validatedLicense.IsValid)
+                        {
+                            // License banned/reset - clear cache dan redirect ke aktivasi
+                            _appLog.Append($"License banned/reset: {validatedLicense.ErrorMessage}");
+                            Services.LicenseService.ClearCache();
+                            WebView.Source = new Uri("https://app.local/activate.html");
+                            return;
+                        }
+                        
+                        _appLog.Append($"License validated online - Plan={validatedLicense.Plan}");
+                        
+                        // Tunggu sedikit agar spinner terlihat sebelum redirect
+                        await Task.Delay(500);
+                        WebView.Source = new Uri("https://app.local/index.html");
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        // Timeout - redirect ke halaman error dengan parameter
+                        var validationElapsed = (DateTime.Now - validationStartTime).TotalSeconds;
+                        _appLog.Append($"Online validation TIMEOUT after {validationElapsed:F2}s: {ex.Message}");
+                        _appLog.Append($"Exception type: {ex.GetType().Name}");
+                        Services.LicenseService.ClearCache();
+                        
+                        // Redirect ke halaman error khusus (validating.html akan handle error via URL parameter)
+                        _appLog.Append("Redirecting to validating.html?error=timeout");
+                        WebView.Source = new Uri("https://app.local/validating.html?error=timeout");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Network error atau error lain - redirect ke halaman error
+                        var validationElapsed = (DateTime.Now - validationStartTime).TotalSeconds;
+                        _appLog.Append($"Online validation FAILED after {validationElapsed:F2}s: {ex.GetType().Name} - {ex.Message}");
+                        _appLog.Append($"Stack trace: {ex.StackTrace}");
+                        Services.LicenseService.ClearCache();
+                        
+                        // Redirect ke halaman error khusus (validating.html akan handle error via URL parameter)
+                        _appLog.Append("Redirecting to validating.html?error=network");
+                        WebView.Source = new Uri("https://app.local/validating.html?error=network");
+                    }
+                }
+
+                // Handler sudah di-attach sebelumnya
                 _appLog.Append("WebView initialized");
+                
                 // Wire realtime log forwarding
                 _appLog.Appended += line =>
                 {
@@ -76,8 +181,6 @@ namespace GameHubDesktop
                     }
                 };
 
-                // Buka DevTools untuk melihat error jika ada
-                WebView.CoreWebView2.OpenDevToolsWindow();
 
                 Width = 1280; Height = 800; WindowState = WindowState.Normal;
                 // Optional fullscreen setelah delay:
@@ -95,6 +198,7 @@ namespace GameHubDesktop
             {
                 var json = e.WebMessageAsJson;
                 var msg = JsonSerializer.Deserialize<DesktopMessage>(json);
+                
                 if (msg == null || string.IsNullOrWhiteSpace(msg.action)) return;
                 // Special-case AppLog messages sent from the web UI: append the payload.message
                 // directly to the AppLogService and do not emit the generic "Action received: AppLog" entry.
@@ -108,7 +212,22 @@ namespace GameHubDesktop
                     catch { }
                     return;
                 }
-                _appLog.Append($"Action received: {msg.action}");
+                
+                // Hanya log action penting, skip action yang terlalu sering
+                var importantActions = new[] { "ActivateLicense", "ForceUpdateOverride", "AddGame", "RemoveGame", "ApplyOnlineFix", "UnOnlineFix", "Error", "Exception" };
+                bool isImportant = false;
+                foreach (var action in importantActions)
+                {
+                    if (msg.action.Contains(action, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isImportant = true;
+                        break;
+                    }
+                }
+                if (isImportant)
+                {
+                    _appLog.Append($"Action: {msg.action}");
+                }
 
                 switch (msg.action)
                 {
@@ -451,6 +570,22 @@ namespace GameHubDesktop
                         }
                         break;
                     }
+                    case "GetLibraryAppIds":
+                    {
+                        try
+                        {
+                            var result = Services.AddGameService.ListLibraryGames();
+                            // ListLibraryGames returns object with appids array
+                            var appids = result.GetType().GetProperty("appids")?.GetValue(result) as string[] ?? Array.Empty<string>();
+                            SendToJs(new { type = "LibraryAppIds", appids = appids });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetLibraryAppIds error: {ex.Message}");
+                            SendToJs(new { type = "LibraryAppIds", appids = Array.Empty<string>(), error = ex.Message });
+                        }
+                        break;
+                    }
                     case "CheckOverrideUpdate":
                     {
                         try
@@ -512,6 +647,135 @@ namespace GameHubDesktop
                         }
                         break;
                     }
+                    case "GetLicenseInfo":
+                    {
+                        try
+                        {
+                            var license = Services.LicenseService.GetCurrentLicense();
+                            // Get device ID async untuk menghindari blocking
+                            string deviceId = await Task.Run(() => GameHubLicensing.DeviceIdHelper.GetDeviceId());
+                            string licenseKeyDisplay = "";
+                            
+                            // Mask license key untuk keamanan (tampilkan 8 karakter pertama dan terakhir)
+                            if (!string.IsNullOrEmpty(license.LicenseKey))
+                            {
+                                var key = license.LicenseKey;
+                                if (key.Length > 16)
+                                {
+                                    licenseKeyDisplay = key.Substring(0, 8) + "..." + key.Substring(key.Length - 8);
+                                }
+                                else
+                                {
+                                    licenseKeyDisplay = key.Substring(0, Math.Min(8, key.Length)) + "...";
+                                }
+                            }
+                            
+                            SendToJs(new
+                            {
+                                type = "LicenseInfo",
+                                plan = license.Plan,
+                                isActive = license.IsActive,
+                                isValid = license.IsValid,
+                                licenseKey = licenseKeyDisplay,
+                                deviceId = deviceId,
+                                errorMessage = license.ErrorMessage
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetLicenseInfo error: {ex.Message}");
+                            SendToJs(new
+                            {
+                                type = "LicenseInfo",
+                                plan = "standard",
+                                isActive = false,
+                                isValid = false,
+                                licenseKey = "",
+                                deviceId = "",
+                                errorMessage = ex.Message
+                            });
+                        }
+                        break;
+                    }
+                    case "ActivateLicense":
+                    {
+                        var licenseKey = msg.payload.TryGetProperty("licenseKey", out var lk) ? (lk.GetString() ?? string.Empty) : string.Empty;
+                        
+                        if (string.IsNullOrWhiteSpace(licenseKey))
+                        {
+                            SendToJs(new
+                            {
+                                type = "LicenseActivationResult",
+                                success = false,
+                                error = "License key tidak boleh kosong"
+                            });
+                            break;
+                        }
+                        
+                        _appLog.Append($"Activating license: {licenseKey.Substring(0, Math.Min(8, licenseKey.Length))}...");
+                        
+                        // Jalankan aktivasi di background thread agar tidak blocking UI
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                Services.LicenseService.ClearCache();
+                                var result = await Services.LicenseService.ActivateAsync(licenseKey).ConfigureAwait(false);
+                                
+                                // Deteksi status error untuk pesan yang lebih spesifik
+                                bool isBanned = false;
+                                bool isNotFound = false;
+                                bool isWrongDevice = false;
+                                
+                                if (!result.IsActive && !string.IsNullOrEmpty(result.ErrorMessage))
+                                {
+                                    var errorLower = result.ErrorMessage.ToLower();
+                                    isBanned = errorLower.Contains("banned") || errorLower.Contains("dibanned");
+                                    isNotFound = errorLower.Contains("tidak ditemukan") || errorLower.Contains("not_found") || errorLower.Contains("not found");
+                                    isWrongDevice = errorLower.Contains("perangkat lain") || errorLower.Contains("wrong_device") || errorLower.Contains("device berbeda");
+                                }
+                                
+                                // Gunakan Dispatcher untuk memastikan SendToJs dipanggil di UI thread
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    try
+                                    {
+                                        SendToJs(new
+                                        {
+                                            type = "LicenseActivationResult",
+                                            success = result.IsActive && result.IsValid,
+                                            plan = result.Plan,
+                                            message = result.ErrorMessage ?? (result.IsActive ? "License berhasil diaktivasi!" : "License gagal diaktivasi"),
+                                            error = result.ErrorMessage,
+                                            isBanned = isBanned,
+                                            isNotFound = isNotFound,
+                                            isWrongDevice = isWrongDevice,
+                                            licenseKey = result.LicenseKey
+                                        });
+                                    }
+                                    catch (Exception sendEx)
+                                    {
+                                        _appLog.Append($"Error sending activation response: {sendEx.Message}");
+                                    }
+                                }, System.Windows.Threading.DispatcherPriority.Normal);
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"License activation error: {ex.Message}");
+                                
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "LicenseActivationResult",
+                                        success = false,
+                                        message = $"Error: {ex.Message}"
+                                    });
+                                }, System.Windows.Threading.DispatcherPriority.Normal);
+                            }
+                        });
+                        break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -545,9 +809,27 @@ namespace GameHubDesktop
                         _appliedCache[appidInt] = true;
                     }
                 }
-                if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "RawDatasetProgress", StringComparison.OrdinalIgnoreCase))
+                // Hanya log event penting, skip event yang terlalu sering
+                if (!string.IsNullOrWhiteSpace(type) && 
+                    !string.Equals(type, "RawDatasetProgress", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(type, "AppLogAppend", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(type, "AppLog", StringComparison.OrdinalIgnoreCase))
                 {
-                    _appLog.Append($"Event sent: {type}");
+                    // Skip logging untuk event yang terlalu sering atau tidak penting
+                    var importantEvents = new[] { "Error", "Exception", "LicenseActivationResult", "OverrideUpdateResult" };
+                    bool isImportantEvent = false;
+                    foreach (var evt in importantEvents)
+                    {
+                        if (type.Contains(evt, StringComparison.OrdinalIgnoreCase))
+                        {
+                            isImportantEvent = true;
+                            break;
+                        }
+                    }
+                    if (isImportantEvent)
+                    {
+                        _appLog.Append($"Event: {type}");
+                    }
                 }
             }
             catch (Exception ex)

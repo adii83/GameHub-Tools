@@ -2,6 +2,8 @@ async function navigate(page) {
   const container = document.getElementById("app-content");
   const sidebarDashboard = document.getElementById("nav-dashboard");
   const sidebarGames = document.getElementById("nav-games");
+  const sidebarLibrary = document.getElementById("nav-library");
+  const sidebarSettings = document.getElementById("nav-settings");
 
   // Load page
   const html = await fetch(`/app/${page}.html`).then((r) => r.text());
@@ -28,15 +30,20 @@ async function navigate(page) {
   // Active state
   sidebarDashboard?.classList.remove("bg-[#1f1f1f]", "text-white");
   sidebarGames?.classList.remove("bg-[#1f1f1f]", "text-white");
-  // sidebarLibrary removed — Library page has been deleted
+  sidebarLibrary?.classList.remove("bg-[#1f1f1f]", "text-white");
+  sidebarSettings?.classList.remove("bg-[#1f1f1f]", "text-white");
 
   if (page === "dashboard") {
     sidebarDashboard?.classList.add("bg-[#1f1f1f]", "text-white");
   } else if (page === "games") {
     sidebarGames?.classList.add("bg-[#1f1f1f]", "text-white");
+  } else if (page === "library") {
+    sidebarLibrary?.classList.add("bg-[#1f1f1f]", "text-white");
+  } else if (page === "settings") {
+    sidebarSettings?.classList.add("bg-[#1f1f1f]", "text-white");
   }
 
-  // Jika halaman adalah Games → jalankan render
+  // Jika halaman adalah Games → jalankan render dengan filter normal
   if (page === "games") {
     // Load filter panel HTML into the filter-panel container (if present)
     const filterPanelHtml = await fetch("/components/filter-panel.html").then((r) => r.text());
@@ -45,22 +52,163 @@ async function navigate(page) {
       filterPanelContainer.innerHTML = filterPanelHtml;
     }
 
-    // Call whichever game loader is available (maintain compatibility)
-    if (typeof loadGames === "function") {
-      loadGames();
-    } else if (typeof initGamesPage === "function") {
-      initGamesPage();
+    // Reset library filter jika aktif
+    if (typeof window.libraryFilterActive !== 'undefined') {
+      window.libraryFilterActive = false;
+    }
+    // Also reset local variable in filter.js
+    if (typeof libraryFilterActive !== 'undefined') {
+      libraryFilterActive = false;
+    }
+
+    // Call initGamesPage untuk load games (loadGames hanya untuk settings page)
+    if (typeof initGamesPage === "function") {
+      await initGamesPage();
+    } else if (typeof loadGames === "function") {
+      // Fallback jika initGamesPage tidak ada
+      await loadGames();
     }
   }
 
-  // Library page removed — no special actions required
+  // Jika halaman adalah Library → jalankan render dengan filter Library aktif
+  if (page === "library") {
+    // Cleanup hidden cards (remove from DOM permanently)
+    if (window.hiddenCards && window.hiddenCards.size > 0) {
+      window.hiddenCards.forEach(appid => {
+        const cardWrapper = document.getElementById(`game-card-wrapper-${appid}`);
+        const card = document.getElementById(`game-${appid}`);
+        const target = cardWrapper || card;
+        if (target && target.parentNode) {
+          target.remove();
+        }
+      });
+      window.hiddenCards.clear();
+    }
+    
+    // Aktifkan library filter dan load games
+    if (typeof toggleLibraryFilter === "function") {
+      // Load library games (akan otomatis filter berdasarkan .lua files)
+      await toggleLibraryFilter();
+    } else if (typeof initGamesPage === "function") {
+      // Fallback: init games page lalu aktifkan library filter
+      await initGamesPage();
+      if (typeof toggleLibraryFilter === "function") {
+        await toggleLibraryFilter();
+      }
+    }
+  }
+
+  // Jika halaman adalah Settings → load license info dan subscribe logs
+  if (page === "settings") {
+    // Wait a bit untuk memastikan script di settings.html sudah ter-load
+    setTimeout(() => {
+      // Load license info (fungsi ada di settings.html)
+      if (typeof loadSettingsLicenseInfo === 'function') {
+        loadSettingsLicenseInfo();
+      } else {
+        // Fallback: load license info via bridge langsung
+        if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+          window.desktopBridge.getLicenseInfo().then(licenseInfo => {
+            const planBadge = document.getElementById('settings-license-plan-badge');
+            const keyDisplay = document.getElementById('settings-license-key');
+            const deviceDisplay = document.getElementById('settings-device-id');
+            
+            if (planBadge) {
+              if (licenseInfo.isValid && licenseInfo.isActive) {
+                const planText = licenseInfo.plan === 'premium' ? 'Premium' : 'Standard';
+                planBadge.textContent = planText;
+                planBadge.className = licenseInfo.plan === 'premium' 
+                  ? 'px-3 py-1 rounded text-sm font-medium bg-yellow-500/20 text-yellow-400'
+                  : 'px-3 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-400';
+              } else {
+                planBadge.textContent = 'Tidak Aktif';
+                planBadge.className = 'px-3 py-1 rounded text-sm font-medium bg-red-500/20 text-red-400';
+              }
+            }
+            
+            if (keyDisplay) keyDisplay.textContent = licenseInfo.licenseKey || '-';
+            if (deviceDisplay) deviceDisplay.textContent = licenseInfo.deviceId || '-';
+          }).catch(e => console.warn('Failed to load license info:', e));
+        }
+      }
+      
+      // Subscribe to logs (hanya jika belum subscribe)
+      if (window.desktopBridge && typeof window.desktopBridge.send === 'function' && !window._settingsLogSubscribed) {
+        window._settingsLogSubscribed = true;
+        window.desktopBridge.send('SubscribeAppLog', {});
+        // Load initial logs
+        window.desktopBridge.send('GetAppLog', {});
+      }
+    }, 100);
+  } else {
+    // Unsubscribe dari logs saat keluar dari Settings page
+    if (window._settingsLogSubscribed && window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+      window._settingsLogSubscribed = false;
+      window.desktopBridge.send('UnsubscribeAppLog', {});
+    }
+  }
 }
 
 // Load sidebar
 async function loadSidebar() {
   const sidebar = await fetch("/components/sidebar.html").then((r) => r.text());
   document.getElementById("sidebar-container").innerHTML = sidebar;
+  
+  // Load license info setelah sidebar dimuat
+  await loadLicenseInfo();
 }
+
+// Load and display license info
+async function loadLicenseInfo() {
+  try {
+    if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+      const licenseInfo = await window.desktopBridge.getLicenseInfo();
+      
+      const planBadge = document.getElementById('license-plan-badge');
+      const keyDisplay = document.getElementById('license-key-display');
+      const deviceDisplay = document.getElementById('license-device-display');
+      
+      if (planBadge) {
+        if (licenseInfo.isValid && licenseInfo.isActive) {
+          const planText = licenseInfo.plan === 'premium' ? 'Premium' : 'Standard';
+          planBadge.textContent = planText;
+          planBadge.className = licenseInfo.plan === 'premium' 
+            ? 'text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400'
+            : 'text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400';
+        } else {
+          planBadge.textContent = 'Tidak Aktif';
+          planBadge.className = 'text-xs px-2 py-0.5 rounded bg-red-500/20 text-red-400';
+        }
+      }
+      
+      if (keyDisplay) {
+        keyDisplay.textContent = licenseInfo.licenseKey || '-';
+      }
+      
+      if (deviceDisplay) {
+        // Tampilkan 16 karakter pertama dan terakhir dari device ID
+        if (licenseInfo.deviceId && licenseInfo.deviceId.length > 32) {
+          deviceDisplay.textContent = licenseInfo.deviceId.substring(0, 16) + '...' + licenseInfo.deviceId.substring(licenseInfo.deviceId.length - 16);
+        } else {
+          deviceDisplay.textContent = licenseInfo.deviceId || '-';
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load license info:', e);
+    // Set default values jika error
+    const planBadge = document.getElementById('license-plan-badge');
+    const keyDisplay = document.getElementById('license-key-display');
+    const deviceDisplay = document.getElementById('license-device-display');
+    
+    if (planBadge) planBadge.textContent = '-';
+    if (keyDisplay) keyDisplay.textContent = '-';
+    if (deviceDisplay) deviceDisplay.textContent = '-';
+  }
+}
+
+// Expose globally
+window.loadLicenseInfo = loadLicenseInfo;
 
 // Start app
 loadSidebar().then(() => navigate("games"));

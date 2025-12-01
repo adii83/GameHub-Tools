@@ -22,6 +22,12 @@ function tokenizeAndStemLocal(s) {
   return tokens.map(stem);
 }
 
+// Library filter state (AppIDs from steam\config\stplug-in\*.lua files)
+let libraryAppIds = new Set();
+let libraryFilterActive = false;
+// Expose to window for render.js
+window.libraryFilterActive = false;
+
 function applyFilters(render = true) {
   // Do not clear page cache on filter change; we avoid triggering rebuilds
   // so filtering operates only on already-fetched data.
@@ -41,11 +47,19 @@ function applyFilters(render = true) {
   // Also expose whether the active filters should force filling pages
   // (Premium/Standard should attempt to fill pages to PAGE_SIZE).
   try {
-    window.filtersActive = !!(standard || premium || denuvo || nonDen || genreChecks.length > 0 || searchNorm);
+    window.filtersActive = !!(standard || premium || denuvo || nonDen || genreChecks.length > 0 || searchNorm || libraryFilterActive);
     window.fillFilteredPages = !!(standard || premium);
   } catch (e) {}
 
-  filteredData = originalData.filter((game) => {
+  // Special case: Library filter active but no games installed
+  if (libraryFilterActive && libraryAppIds.size === 0) {
+    filteredData = []; // Empty array - will show special empty state
+  } else {
+    filteredData = originalData.filter((game) => {
+      // Library filter: only show games that have .lua file in stplug-in folder
+      if (libraryFilterActive && libraryAppIds.size > 0) {
+        if (!libraryAppIds.has(String(game.appid))) return false;
+      }
     const isPremium = game.price_initial >= PREMIUM_MIN;
 
     // Search: fuzzy match normalized title or exact appid when numeric
@@ -86,8 +100,23 @@ function applyFilters(render = true) {
       if (!genreChecks.some((g) => gameGenres.includes(g))) return false;
     }
 
-    return true;
-  });
+      return true;
+    });
+  }
+
+  // Update Library button visual state
+  try {
+    const libraryBtn = document.getElementById('nav-library');
+    if (libraryBtn) {
+      if (libraryFilterActive) {
+        libraryBtn.classList.add('bg-blue-600/20', 'text-blue-300');
+        libraryBtn.classList.remove('text-gray-300');
+      } else {
+        libraryBtn.classList.remove('bg-blue-600/20', 'text-blue-300');
+        libraryBtn.classList.add('text-gray-300');
+      }
+    }
+  } catch (e) {}
 
   if (render) {
     renderPage(1);
@@ -95,10 +124,32 @@ function applyFilters(render = true) {
     try {
       const list = document.getElementById('game-list');
       if (list && filteredData.length === 0) {
-        list.innerHTML = `
-          <div class="text-center text-sm text-gray-400 py-10 border border-white/5 rounded-xl bg-[#151515]">
-            Tidak ada game yang cocok dengan pencarian atau filter.
-          </div>`;
+        // Special empty state for Library page when no games installed
+        if (libraryFilterActive && libraryAppIds.size === 0) {
+          list.innerHTML = `
+            <div class="text-center py-16 px-4 border border-white/10 rounded-xl bg-gradient-to-br from-[#151515] to-[#0f0f0f]">
+              <div class="max-w-md mx-auto">
+                <div class="text-6xl mb-4">📚</div>
+                <h3 class="text-xl font-semibold text-white mb-2">Tidak Ada Game di Library</h3>
+                <p class="text-gray-400 text-sm mb-6 leading-relaxed">
+                  Library Anda masih kosong. Tambahkan game kesukaan Anda dari halaman Games untuk memulai.
+                </p>
+                <button onclick="navigate('games')" 
+                  class="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition shadow-lg hover:shadow-blue-500/50">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                  </svg>
+                  Jelajahi Games
+                </button>
+              </div>
+            </div>`;
+        } else {
+          // Generic empty state for other filters/search
+          list.innerHTML = `
+            <div class="text-center text-sm text-gray-400 py-10 border border-white/5 rounded-xl bg-[#151515]">
+              Tidak ada game yang cocok dengan pencarian atau filter.
+            </div>`;
+        }
       }
     } catch (e) {}
   }
@@ -143,7 +194,7 @@ async function performRemoteSearch() {
         }
         if (typeof applyFilters === 'function') applyFilters(true);
       } else {
-        showTransientMessage('Tidak ada hasil ditemukan.', 4000);
+        showTransientMessage('Tidak ada hasil ditemukan.', 4000, 'warning');
         // Also reflect in the list area for clarity
         try {
           const list = document.getElementById('game-list');
@@ -327,3 +378,74 @@ async function loadGenreList(data) {
     }
   } catch (e) {}
 }
+
+// Toggle Library filter (show only games with .lua files in stplug-in)
+// Used for Library page - automatically activates filter and loads games
+async function toggleLibraryFilter() {
+  try {
+    if (!window.desktopBridge || typeof window.desktopBridge.getLibraryAppIds !== 'function') {
+      if (typeof showTransientMessage === 'function') {
+        showTransientMessage('Bridge tidak tersedia', 3000, 'error');
+      }
+      // Fallback: init games page without filter
+      if (typeof initGamesPage === 'function') {
+        await initGamesPage();
+      }
+      return;
+    }
+
+    // Always activate library filter for Library page
+    // Load AppIDs from C# bridge
+    try {
+      const appids = await window.desktopBridge.getLibraryAppIds();
+      libraryAppIds = new Set(appids || []);
+      
+      // Initialize games page first if not already loaded
+      if (!window.originalData || window.originalData.length === 0) {
+        if (typeof initGamesPage === 'function') {
+          await initGamesPage();
+        }
+      }
+      
+      if (libraryAppIds.size === 0) {
+        if (typeof showTransientMessage === 'function') {
+          showTransientMessage('Tidak ada game terinstall ditemukan', 3000, 'warning');
+        }
+        // Still show empty list
+        libraryFilterActive = true;
+        window.libraryFilterActive = true;
+        applyFilters(true);
+        return;
+      }
+
+      libraryFilterActive = true;
+      window.libraryFilterActive = true;
+      applyFilters(true);
+      
+      if (typeof showTransientMessage === 'function') {
+        showTransientMessage(`Menampilkan ${libraryAppIds.size} game dari Library`, 3000, 'success');
+      }
+    } catch (e) {
+      if (typeof showTransientMessage === 'function') {
+        showTransientMessage('Gagal memuat Library: ' + (e.message || 'Unknown error'), 4000, 'error');
+      }
+      // Fallback: init games page without filter
+      if (typeof initGamesPage === 'function') {
+        await initGamesPage();
+      }
+    }
+  } catch (e) {
+    if (typeof showTransientMessage === 'function') {
+      showTransientMessage('Error: ' + (e.message || 'Unknown error'), 4000, 'error');
+    }
+    // Fallback: init games page without filter
+    if (typeof initGamesPage === 'function') {
+      await initGamesPage();
+    }
+  }
+}
+
+// Expose to window
+try {
+  window.toggleLibraryFilter = toggleLibraryFilter;
+} catch (e) {}
