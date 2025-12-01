@@ -11,6 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2521.47" />
     <PackageReference Include="SharpCompress" Version="0.37.2" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\gamehub.ico" />

@@ -1,45 +1,62 @@
-// Check Update functionality for override data
-async function checkOverrideUpdate() {
-  const btn = document.getElementById('btn-check-update');
+// Load Games functionality - reload game data dari GitHub (raw data + override)
+async function loadGames() {
+  const btn = document.getElementById('btn-load-games-settings') || document.getElementById('btn-check-update');
   if (!btn) return;
   
-  // Disable button during check
+  // Disable button during load
   const originalText = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳</span><span>Checking...</span>';
+  btn.innerHTML = '<span>⏳</span><span>Loading...</span>';
   
   try {
-    if (!window.desktopBridge || typeof window.desktopBridge.checkOverrideUpdate !== 'function') {
-      showTransientMessage('Bridge tidak tersedia', 3000);
-      return;
+    // Check update untuk override data dulu
+    if (window.desktopBridge && typeof window.desktopBridge.checkOverrideUpdate === 'function') {
+      const result = await window.desktopBridge.checkOverrideUpdate();
+      
+      if (result.hasUpdate) {
+        // Ada update override tersedia
+        const shouldUpdate = await premiumConfirm(
+          `Ada update override data tersedia. Update sekarang?\n\nTerakhir update: ${result.lastUpdate || 'Tidak diketahui'}`,
+          'Update Tersedia'
+        );
+        if (shouldUpdate) {
+          await forceUpdateOverride();
+        }
+      }
     }
     
-    const result = await window.desktopBridge.checkOverrideUpdate();
-    
-    if (result.hasUpdate) {
-      // Ada update tersedia
-      const updateMsg = `Update tersedia! Terakhir update: ${result.lastUpdate || 'Tidak diketahui'}`;
-      showTransientMessage(updateMsg, 5000);
-      
-      // Tanya user apakah ingin update sekarang
-      if (confirm('Ada update override data tersedia. Update sekarang?')) {
-        await forceUpdateOverride();
+    // Reload game data (raw data + override)
+    if (typeof refreshGithubRaw === 'function') {
+      await refreshGithubRaw();
+      // refreshGithubRaw sudah pakai showTransientMessage, tapi kita ganti dengan modal
+      if (typeof premiumAlert === 'function') {
+        premiumAlert('Game data berhasil dimuat ulang!', 'Berhasil');
+      }
+    } else if (typeof initGamesPage === 'function') {
+      await initGamesPage();
+      if (typeof premiumAlert === 'function') {
+        premiumAlert('Game data berhasil dimuat ulang!', 'Berhasil');
       }
     } else {
-      // Tidak ada update
-      const lastUpdate = result.lastUpdate ? `Terakhir update: ${result.lastUpdate}` : 'Belum pernah di-update';
-      showTransientMessage(`Sudah up-to-date. ${lastUpdate}`, 3000);
+      throw new Error('Fungsi load games tidak tersedia');
     }
   } catch (e) {
-    showTransientMessage('Gagal cek update: ' + (e.message || 'Unknown error'), 4000);
+    if (typeof premiumAlert === 'function') {
+      premiumAlert('Gagal memuat game data: ' + (e.message || 'Unknown error'), 'Error');
+    }
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalText;
   }
 }
 
+// Keep old function name for backward compatibility
+async function checkOverrideUpdate() {
+  return loadGames();
+}
+
 async function forceUpdateOverride() {
-  const btn = document.getElementById('btn-check-update');
+  const btn = document.getElementById('btn-load-games-settings') || document.getElementById('btn-check-update');
   if (!btn) return;
   
   // Show loading
@@ -49,7 +66,9 @@ async function forceUpdateOverride() {
   
   try {
     if (!window.desktopBridge || typeof window.desktopBridge.forceUpdateOverride !== 'function') {
-      showTransientMessage('Bridge tidak tersedia', 3000);
+      if (typeof premiumAlert === 'function') {
+        premiumAlert('Bridge tidak tersedia', 'Error');
+      }
       return;
     }
     
@@ -63,25 +82,35 @@ async function forceUpdateOverride() {
           // Force reload override dengan memanggil getGlobalOverride(true) via bridge
           // Tapi lebih baik langsung reload dataset karena override sudah ter-update di disk
           await refreshGithubRaw();
-          showTransientMessage('Dataset berhasil di-update!', 4000);
+          if (typeof premiumAlert === 'function') {
+            premiumAlert('Dataset berhasil di-update!', 'Berhasil');
+          }
         } catch (e) {
-          showTransientMessage('Override data berhasil di-update! Aplikasi akan reload...', 3000);
+          if (typeof premiumAlert === 'function') {
+            premiumAlert('Override data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
+          }
           setTimeout(() => {
             window.location.reload();
           }, 2000);
         }
       } else {
         // Fallback: reload page
-        showTransientMessage('Override data berhasil di-update! Aplikasi akan reload...', 3000);
+        if (typeof premiumAlert === 'function') {
+          premiumAlert('Override data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
+        }
         setTimeout(() => {
           window.location.reload();
         }, 2000);
       }
     } else {
-      showTransientMessage('Gagal update: ' + (result.error || 'Unknown error'), 4000);
+      if (typeof premiumAlert === 'function') {
+        premiumAlert('Gagal update: ' + (result.error || 'Unknown error'), 'Error');
+      }
     }
   } catch (e) {
-    showTransientMessage('Gagal update: ' + (e.message || 'Unknown error'), 4000);
+    if (typeof premiumAlert === 'function') {
+      premiumAlert('Gagal update: ' + (e.message || 'Unknown error'), 'Error');
+    }
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalText;
@@ -89,4 +118,5 @@ async function forceUpdateOverride() {
 }
 
 // Expose globally
-window.checkOverrideUpdate = checkOverrideUpdate;
+window.loadGames = loadGames;
+window.checkOverrideUpdate = checkOverrideUpdate; // Backward compatibility

@@ -1,0 +1,316 @@
+<div class="max-w-6xl mx-auto">
+  <h1 class="text-3xl font-bold mb-6">Settings</h1>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- LEFT COLUMN: License Info & Actions -->
+    <div class="space-y-6">
+      <!-- License Information Card -->
+      <div class="bg-neutral-800/50 rounded-lg border border-white/10 p-6">
+        <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+          <span>🔑</span>
+          <span>License Information</span>
+        </h2>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="text-sm text-gray-400 block mb-1">Plan</label>
+            <div class="flex items-center gap-2">
+              <span id="settings-license-plan-badge" class="px-3 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-400">
+                Loading...
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-sm text-gray-400 block mb-1">License Key</label>
+            <div class="flex items-center gap-2">
+              <code id="settings-license-key" class="px-3 py-2 bg-neutral-900/50 rounded border border-white/5 text-sm font-mono text-gray-300 flex-1 truncate">
+                Loading...
+              </code>
+              <button onclick="copyToClipboard('settings-license-key')" 
+                class="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 rounded text-sm transition">
+                📋
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="text-sm text-gray-400 block mb-1">Device ID</label>
+            <div class="flex items-center gap-2">
+              <code id="settings-device-id" class="px-3 py-2 bg-neutral-900/50 rounded border border-white/5 text-sm font-mono text-gray-300 flex-1 truncate">
+                Loading...
+              </code>
+              <button onclick="copyToClipboard('settings-device-id')" 
+                class="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 rounded text-sm transition">
+                📋
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions Card -->
+      <div class="bg-neutral-800/50 rounded-lg border border-white/10 p-6">
+        <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+          <span>⚙️</span>
+          <span>Actions</span>
+        </h2>
+        
+        <div class="space-y-3">
+          <button onclick="loadGames()" id="btn-load-games-settings"
+            class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 hover:border-blue-500/50 text-blue-400 transition">
+            <span>🔄</span>
+            <span>Load Games</span>
+          </button>
+
+          <button onclick="handleClearCache()"
+            class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-yellow-600/20 hover:bg-yellow-600/30 border border-yellow-500/30 hover:border-yellow-500/50 text-yellow-400 transition">
+            <span>🧹</span>
+            <span>Clear Cache</span>
+          </button>
+
+          <button onclick="handleClearData()" 
+            class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 hover:border-red-500/50 text-red-400 transition">
+            <span>🗑️</span>
+            <span>Clear Data</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: Logs -->
+    <div class="space-y-6">
+      <div class="bg-neutral-800/50 rounded-lg border border-white/10 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold flex items-center gap-2">
+            <span>🧾</span>
+            <span>Application Logs</span>
+          </h2>
+          <div class="flex items-center gap-2">
+            <button onclick="refreshLogs()" 
+              class="px-3 py-1.5 rounded bg-neutral-700 hover:bg-neutral-600 text-sm transition">
+              🔄 Refresh
+            </button>
+            <button onclick="clearLogs()" 
+              class="px-3 py-1.5 rounded bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 text-sm transition">
+              🗑️ Clear
+            </button>
+          </div>
+        </div>
+        
+        <div id="settings-log-container" class="bg-neutral-900/50 rounded border border-white/5 p-4 h-[600px] overflow-auto premium-scroll">
+          <div id="settings-log-body" class="font-mono text-xs text-gray-300 whitespace-pre-wrap">
+            Loading logs...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/bridge.js"></script>
+<script src="/js/modal.js"></script>
+<script src="/js/update.js"></script>
+<script src="/js/render.js"></script>
+<script>
+  // Load license info untuk settings page
+  async function loadSettingsLicenseInfo() {
+    try {
+      if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+        const licenseInfo = await window.desktopBridge.getLicenseInfo();
+        
+        const planBadge = document.getElementById('settings-license-plan-badge');
+        const keyDisplay = document.getElementById('settings-license-key');
+        const deviceDisplay = document.getElementById('settings-device-id');
+        
+        if (planBadge) {
+          if (licenseInfo.isValid && licenseInfo.isActive) {
+            const planText = licenseInfo.plan === 'premium' ? 'Premium' : 'Standard';
+            planBadge.textContent = planText;
+            planBadge.className = licenseInfo.plan === 'premium' 
+              ? 'px-3 py-1 rounded text-sm font-medium bg-yellow-500/20 text-yellow-400'
+              : 'px-3 py-1 rounded text-sm font-medium bg-blue-500/20 text-blue-400';
+          } else {
+            planBadge.textContent = 'Tidak Aktif';
+            planBadge.className = 'px-3 py-1 rounded text-sm font-medium bg-red-500/20 text-red-400';
+          }
+        }
+        
+        if (keyDisplay) {
+          keyDisplay.textContent = licenseInfo.licenseKey || '-';
+        }
+        
+        if (deviceDisplay) {
+          deviceDisplay.textContent = licenseInfo.deviceId || '-';
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load license info:', e);
+    }
+  }
+
+  // Copy to clipboard helper
+  function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+      const text = element.textContent.trim();
+      navigator.clipboard.writeText(text).then(() => {
+        if (typeof showPremiumToast === 'function') {
+          showPremiumToast('Copied to clipboard!', 2000, 'success');
+        }
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+      });
+    }
+  }
+
+  // Load logs untuk settings page
+  async function loadSettingsLogs() {
+    try {
+      if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+        window.desktopBridge.send('GetAppLog', {});
+      }
+    } catch (e) {
+      console.error('Failed to load logs:', e);
+    }
+  }
+
+  // Refresh logs
+  function refreshLogs() {
+    loadSettingsLogs();
+  }
+
+  // Clear logs display
+  function clearLogs() {
+    const logBody = document.getElementById('settings-log-body');
+    if (logBody) {
+      logBody.textContent = '';
+    }
+  }
+
+  // Filter log untuk hanya menampilkan yang penting
+  function shouldShowLog(line) {
+    if (!line || typeof line !== 'string') return false;
+    
+    const lowerLine = line.toLowerCase();
+    
+    // Skip log yang tidak penting
+    const skipPatterns = [
+      'event sent:',
+      'action received:',
+      'action:',
+      'event:',
+      '[detail] source=',
+      '[getfullmetadataforappid]',
+      '[fetchgithubapplist]',
+      '[fetchgithubfullraw]',
+      '[loadoverride]',
+      '[merge]',
+      'checkgameinstalled',
+      'checkonlinefixapplied',
+      'checkonlinefix',
+      'getmetadataforappid',
+      'libraryfolders.vdf found',
+      'findlibrarypathforapp',
+      'appmanifest found',
+      'deep-scan found',
+      'global search found',
+      'fallback found',
+      'rawdatasetprogress'
+    ];
+    
+    // Skip jika mengandung pattern yang tidak penting
+    if (skipPatterns.some(pattern => lowerLine.includes(pattern))) {
+      return false;
+    }
+    
+    // Hanya tampilkan log penting
+    const importantPatterns = [
+      'error',
+      'exception',
+      'failed',
+      'success',
+      'license',
+      'activated',
+      'activation',
+      'update',
+      'override',
+      'cache',
+      'clear',
+      'app start',
+      'webview initialized',
+      'addgame',
+      'removegame',
+      'onlinefix',
+      'restart steam',
+      'banned',
+      'invalid'
+    ];
+    
+    return importantPatterns.some(pattern => lowerLine.includes(pattern));
+  }
+
+  // Listen for log updates dengan filter (hanya sekali, tidak duplikat)
+  if (window.chrome && window.chrome.webview && !window._settingsLogListenerAttached) {
+    window._settingsLogListenerAttached = true;
+    window.chrome.webview.addEventListener('message', (event) => {
+      try {
+        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        
+        if (data.type === 'AppLog') {
+          const logBody = document.getElementById('settings-log-body');
+          if (logBody) {
+            let lines = [];
+            if (Array.isArray(data.lines)) {
+              lines = data.lines.filter(shouldShowLog);
+            } else if (typeof data.lines === 'string') {
+              const splitLines = data.lines.split('\n');
+              lines = splitLines.filter(shouldShowLog);
+            }
+            logBody.textContent = lines.join('\n');
+            // Auto scroll to bottom
+            const container = document.getElementById('settings-log-container');
+            if (container) {
+              container.scrollTop = container.scrollHeight;
+            }
+          }
+        } else if (data.type === 'AppLogAppend') {
+          const logBody = document.getElementById('settings-log-body');
+          if (logBody && data.line && shouldShowLog(data.line)) {
+            const nearBottom = (logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight) < 40;
+            if (logBody.textContent && logBody.textContent.length) {
+              logBody.textContent += '\n' + data.line;
+            } else {
+              logBody.textContent = data.line;
+            }
+            // Auto scroll to bottom jika user sedang di bawah
+            if (nearBottom) {
+              const container = document.getElementById('settings-log-container');
+              if (container) {
+                container.scrollTop = container.scrollHeight;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing log message:', e);
+      }
+    });
+  }
+
+  // Subscribe to logs when page loads (hanya sekali)
+  if (window.desktopBridge && typeof window.desktopBridge.send === 'function' && !window._settingsLogSubscribed) {
+    window._settingsLogSubscribed = true;
+    window.desktopBridge.send('SubscribeAppLog', {});
+  }
+
+  // Load data saat page dimuat
+  loadSettingsLicenseInfo();
+  loadSettingsLogs();
+
+  // Expose functions globally
+  window.copyToClipboard = copyToClipboard;
+  window.refreshLogs = refreshLogs;
+  window.clearLogs = clearLogs;
+</script>
+

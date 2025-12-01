@@ -1,6 +1,8 @@
 let originalData = [];
 let filteredData = [];
 let currentPage = 1;
+// Track hidden cards (removed games that should stay hidden until library page reload)
+let hiddenCards = new Set();
 // Raw-only: tidak ada antrian appid atau proses build incremental
 let buildingInProgress = false;
 // Cache built pages so navigation back/forward shows the same items
@@ -336,22 +338,27 @@ function updateBlockingOverlayProgress(percent, message = null) {
   } catch (e) {}
 }
 
-// Show short centered transient message (used when scraping cannot fill page)
-function showTransientMessage(msg, ms = 4000) {
+// Show short centered transient message (replaced with premium modal)
+function showTransientMessage(msg, ms = 4000, type = 'info') {
   try {
-    let t = document.getElementById('gamehub-transient');
-    if (!t) {
-      t = document.createElement('div');
-      t.id = 'gamehub-transient';
-      t.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);background:#111;padding:12px 18px;border-radius:10px;color:#fff;z-index:11000;box-shadow:0 8px 30px rgba(0,0,0,0.6);font-size:14px;';
-      document.body.appendChild(t);
+    if (typeof showPremiumToast === 'function') {
+      showPremiumToast(msg, ms, type);
+    } else {
+      // Fallback to old method if modal.js not loaded
+      let t = document.getElementById('gamehub-transient');
+      if (!t) {
+        t = document.createElement('div');
+        t.id = 'gamehub-transient';
+        t.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);background:#111;padding:12px 18px;border-radius:10px;color:#fff;z-index:11000;box-shadow:0 8px 30px rgba(0,0,0,0.6);font-size:14px;';
+        document.body.appendChild(t);
+      }
+      t.textContent = msg;
+      t.style.opacity = '1';
+      t.style.display = 'block';
+      setTimeout(() => {
+        try { t.style.opacity = '0'; setTimeout(() => { t.style.display = 'none'; }, 300); } catch(e){}
+      }, ms);
     }
-    t.textContent = msg;
-    t.style.opacity = '1';
-    t.style.display = 'block';
-    setTimeout(() => {
-      try { t.style.opacity = '0'; setTimeout(() => { t.style.display = 'none'; }, 300); } catch(e){}
-    }, ms);
   } catch (e) {}
 }
 
@@ -558,7 +565,7 @@ async function refreshGithubRaw() {
     const full = await fetchGithubFullRaw(false); // false = gunakan cache, tapi override sudah ter-update
     hideBlockingOverlay();
     if (!full || (!Array.isArray(full) && typeof full !== 'object')) {
-      showTransientMessage('Data tidak tersedia.', 4000);
+      showTransientMessage('Data tidak tersedia.', 4000, 'error');
       return;
     }
     // Normalize dan update dataset (akan merge dengan override yang baru)
@@ -579,11 +586,13 @@ async function refreshGithubRaw() {
     }
     
     try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-    showTransientMessage('Data diperbarui.', 4000);
+    // Tidak perlu show message di sini, sudah di-handle di loadGames()
     try { await renderPage(1); } catch (e) {}
   } catch (e) {
     hideBlockingOverlay();
-    showTransientMessage('Gagal memuat pembaruan. Coba lagi nanti.', 5000);
+    if (typeof premiumAlert === 'function') {
+      premiumAlert('Gagal memuat pembaruan. Coba lagi nanti.', 'Error');
+    }
   }
 }
 
@@ -732,31 +741,50 @@ function renderGameCardHTML(game) {
     protection = ``;
   }
 
+  // Check if we're on library page (by checking if library filter is active or page title)
+  const isLibraryPage = window.libraryFilterActive || 
+    (document.querySelector('h1')?.textContent?.trim() === 'Library Games');
+  
+  // Trash button for library page
+  const trashButton = isLibraryPage ? `
+    <button onclick="event.stopPropagation(); handleTrashClick(${game.appid}, '${escapeHtml(game.title)}');" 
+      class="absolute top-2 right-2 w-8 h-8 flex items-center justify-center bg-red-600/90 hover:bg-red-500 rounded-full transition shadow-lg hover:shadow-red-500/50 z-10"
+      title="Hapus Game">
+      <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+      </svg>
+    </button>
+  ` : '';
+
   return `
-  <button id="game-${game.appid}" onclick="openDetail(${game.appid})"
-    class="fade-up text-left flex items-center gap-4 bg-[#151515] hover:bg-white/5 p-4 rounded-xl
-           border border-white/5 transition">
+  <div id="game-card-wrapper-${game.appid}" class="relative fade-up">
+    <button id="game-${game.appid}" onclick="openDetail(${game.appid})"
+      class="w-full text-left flex items-center gap-4 bg-[#151515] hover:bg-white/5 p-4 rounded-xl
+             border border-white/5 transition relative">
 
-    <div class="relative w-36 h-20 flex-shrink-0">
-       <img src="${game.header || ''}" class="w-full h-full object-cover rounded-lg shadow"
-         onerror="(function(img){img.onerror=null;img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';})(this);">
-      <div class="absolute top-1 left-1 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow">
-        ${premiumLabel}
-      </div>
-    </div>
-
-    <div class="flex flex-col justify-center flex-grow">
-      <div class="flex items-center justify-between">
-        <h2 class="text-white font-semibold text-lg truncate">${escapeHtml(game.title)}</h2>
-        ${protection}
+      <div class="relative w-36 h-20 flex-shrink-0">
+         <img src="${game.header || ''}" class="w-full h-full object-cover rounded-lg shadow"
+           onerror="(function(img){img.onerror=null;img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';})(this);">
+        <div class="absolute top-1 left-1 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow">
+          ${premiumLabel}
+        </div>
       </div>
 
-      <div class="flex items-center justify-between mt-1">
-        <p class="text-gray-400 text-sm truncate">${escapeHtml(game.genre_display || (Array.isArray(game.genre) ? game.genre.join(', ') : game.genre || ''))}</p>
-        <p class="text-gray-500 text-xs">AppID: ${game.appid}</p>
+      <div class="flex flex-col justify-center flex-grow">
+        <div class="flex items-center justify-between">
+          <h2 class="text-white font-semibold text-lg truncate">${escapeHtml(game.title)}</h2>
+          ${protection}
+        </div>
+
+        <div class="flex items-center justify-between mt-1">
+          <p class="text-gray-400 text-sm truncate">${escapeHtml(game.genre_display || (Array.isArray(game.genre) ? game.genre.join(', ') : game.genre || ''))}</p>
+          <p class="text-gray-500 text-xs">AppID: ${game.appid}</p>
+        </div>
       </div>
-    </div>
-  </button>`;
+      
+      ${trashButton}
+    </button>
+  </div>`;
 }
 
 // Protection worker: scan originalData for items missing protection and fetch slowly
@@ -852,9 +880,9 @@ async function clearUiCacheOnly() {
     filteredData = [];
     Object.keys(pageCache).forEach(k => delete pageCache[k]);
 
-    showTransientMessage('Cache tampilan dihapus. Data utama tetap disimpan.', 3000);
+    showTransientMessage('Cache tampilan dihapus. Data utama tetap disimpan.', 3000, 'success');
   } catch (e) {
-    showTransientMessage('Gagal menghapus cache tampilan.', 3000);
+    showTransientMessage('Gagal menghapus cache tampilan.', 3000, 'error');
   }
 }
 
@@ -897,26 +925,65 @@ async function clearAllCache() {
       try {
         const result = await window.desktopBridge.clearAllCache();
         if (result && result.success) {
-          showTransientMessage('Semua data & cache dihapus. Aplikasi akan dimuat ulang...', 3000);
+          showTransientMessage('Semua data & cache dihapus. Aplikasi akan dimuat ulang...', 3000, 'success');
           setTimeout(() => {
             window.location.reload();
           }, 1500);
         } else {
           const errorMsg = result?.error || result?.message || 'Unknown error';
-          showTransientMessage('Sebagian cache dihapus. ' + errorMsg, 4000);
+          showTransientMessage('Sebagian cache dihapus. ' + errorMsg, 4000, 'warning');
         }
       } catch (e) {
-        showTransientMessage('Cache localStorage dihapus. Restart aplikasi untuk menghapus cache disk.', 4000);
+        showTransientMessage('Cache localStorage dihapus. Restart aplikasi untuk menghapus cache disk.', 4000, 'info');
       }
     } else {
       showTransientMessage('Cache localStorage dihapus. Restart aplikasi untuk menghapus cache disk.', 4000);
     }
   } catch (e) {
-    showTransientMessage('Gagal menghapus cache: ' + (e.message || 'Unknown error'), 4000);
+    showTransientMessage('Gagal menghapus cache: ' + (e.message || 'Unknown error'), 4000, 'error');
   }
 }
 
 // Expose globally for console access
 window.clearAllCache = clearAllCache;
+
+// Handler functions for sidebar buttons (async confirm)
+async function handleClearCache() {
+  try {
+    if (typeof premiumConfirm === 'function') {
+      const result = await premiumConfirm('Hapus cache tampilan? Data game utama tetap disimpan.', 'Hapus Cache');
+      if (result && typeof clearUiCacheOnly === 'function') {
+        clearUiCacheOnly();
+      }
+    } else if (typeof clearUiCacheOnly === 'function') {
+      clearUiCacheOnly();
+    }
+  } catch (e) {
+    if (typeof showTransientMessage === 'function') {
+      showTransientMessage('Error: ' + (e.message || 'Unknown error'), 4000, 'error');
+    }
+  }
+}
+
+async function handleClearData() {
+  try {
+    if (typeof premiumConfirm === 'function') {
+      const result = await premiumConfirm('Hapus semua data & cache? Dataset akan di-download ulang seperti pertama kali.', 'Hapus Semua Data');
+      if (result && typeof clearAllCache === 'function') {
+        clearAllCache();
+      }
+    } else if (typeof clearAllCache === 'function') {
+      clearAllCache();
+    }
+  } catch (e) {
+    if (typeof showTransientMessage === 'function') {
+      showTransientMessage('Error: ' + (e.message || 'Unknown error'), 4000, 'error');
+    }
+  }
+}
+
+// Expose globally
+window.handleClearCache = handleClearCache;
+window.handleClearData = handleClearData;
 window.clearUiCacheOnly = clearUiCacheOnly;
 window.clearUiCacheOnly = clearUiCacheOnly;

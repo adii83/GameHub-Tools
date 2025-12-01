@@ -48,8 +48,23 @@
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
+
+  /* Premium card remove animation */
+  @keyframes cardRemove {
+    0% {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      filter: blur(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(-100%) scale(0.8);
+      filter: blur(8px);
+    }
+  }
 </style>
 
+<script defer src="js/modal.js"></script>
 <script defer src="js/api.js"></script>
 <script defer src="js/render.js"></script>
 <script defer src="js/filter.js"></script>
