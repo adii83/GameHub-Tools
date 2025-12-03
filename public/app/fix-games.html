@@ -1,0 +1,130 @@
+<div class="space-y-6">
+  <!-- HEADER -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-3xl font-bold">Fix Games</h1>
+    
+    <!-- SEARCH BAR -->
+    <div class="flex items-center gap-2">
+      <input id="fix-games-search" 
+        oninput="handleFixGamesSearch(event)"
+        class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 text-sm w-64 focus:outline-none focus:border-blue-500/50 transition"
+        placeholder="Cari game..." />
+    </div>
+  </div>
+
+  <!-- CATEGORY TABS -->
+  <div class="flex items-center gap-2 overflow-x-auto pb-2 premium-scroll">
+    <button onclick="filterFixGamesByCategory('all')" 
+      id="fix-category-all"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap active-category">
+      Semua
+    </button>
+    <button onclick="filterFixGamesByCategory('ubisoft')" 
+      id="fix-category-ubisoft"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      Ubisoft
+    </button>
+    <button onclick="filterFixGamesByCategory('ea')" 
+      id="fix-category-ea"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      EA
+    </button>
+    <button onclick="filterFixGamesByCategory('rockstar')" 
+      id="fix-category-rockstar"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      Rockstar
+    </button>
+    <button onclick="filterFixGamesByCategory('playstation')" 
+      id="fix-category-playstation"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      PlayStation
+    </button>
+    <button onclick="filterFixGamesByCategory('other')" 
+      id="fix-category-other"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      Other
+    </button>
+  </div>
+
+  <!-- GAME GRID -->
+  <div id="fix-games-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+    <!-- Cards will be rendered here -->
+  </div>
+
+  <!-- EMPTY STATE -->
+  <div id="fix-games-empty" class="hidden text-center py-12">
+    <p class="text-gray-400 text-lg">Tidak ada game ditemukan</p>
+    <p class="text-gray-500 text-sm mt-2">Coba ubah kategori atau kata kunci pencarian</p>
+  </div>
+
+  <!-- LOADING STATE -->
+  <div id="fix-games-loading" class="text-center py-12">
+    <div class="inline-block w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
+    <p class="text-gray-400 text-sm mt-4">Memuat data...</p>
+  </div>
+</div>
+
+<!-- Load scripts -->
+<script src="/js/fix-games.js"></script>
+
+<style>
+  .active-category {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+    border-color: #3b82f6 !important;
+    color: white !important;
+  }
+
+  .fix-game-card {
+    aspect-ratio: 2 / 3; /* Card ratio 2:3 */
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .fix-game-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .fix-game-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* Poster image should be 600x900, but card will scale it to fit 2:3 ratio */
+  }
+
+  .fix-game-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.7) 50%, transparent 100%);
+    padding: 16px;
+    padding-top: 32px;
+  }
+
+  .fix-game-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .fix-game-card-publisher {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 4px;
+  }
+</style>
+
+<script>
+  // Load fix games data when page loads
+  document.addEventListener('DOMContentLoaded', async () => {
+    await initFixGamesPage();
+  });
+</script>
+

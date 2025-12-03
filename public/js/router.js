@@ -3,6 +3,7 @@ async function navigate(page) {
   const sidebarDashboard = document.getElementById("nav-dashboard");
   const sidebarGames = document.getElementById("nav-games");
   const sidebarLibrary = document.getElementById("nav-library");
+  const sidebarFixGames = document.getElementById("nav-fix-games");
   const sidebarSettings = document.getElementById("nav-settings");
 
   // Load page
@@ -31,6 +32,7 @@ async function navigate(page) {
   sidebarDashboard?.classList.remove("bg-[#1f1f1f]", "text-white");
   sidebarGames?.classList.remove("bg-[#1f1f1f]", "text-white");
   sidebarLibrary?.classList.remove("bg-[#1f1f1f]", "text-white");
+  sidebarFixGames?.classList.remove("bg-[#1f1f1f]", "text-white");
   sidebarSettings?.classList.remove("bg-[#1f1f1f]", "text-white");
 
   if (page === "dashboard") {
@@ -39,6 +41,8 @@ async function navigate(page) {
     sidebarGames?.classList.add("bg-[#1f1f1f]", "text-white");
   } else if (page === "library") {
     sidebarLibrary?.classList.add("bg-[#1f1f1f]", "text-white");
+  } else if (page === "fix-games") {
+    sidebarFixGames?.classList.add("bg-[#1f1f1f]", "text-white");
   } else if (page === "settings") {
     sidebarSettings?.classList.add("bg-[#1f1f1f]", "text-white");
   }
@@ -96,6 +100,16 @@ async function navigate(page) {
         await toggleLibraryFilter();
       }
     }
+  }
+
+  // Jika halaman adalah Fix Games → load fix games data
+  if (page === "fix-games") {
+    // Wait a bit untuk memastikan script fix-games.js sudah ter-load
+    setTimeout(() => {
+      if (typeof initFixGamesPage === 'function') {
+        initFixGamesPage();
+      }
+    }, 100);
   }
 
   // Jika halaman adalah Settings → load license info dan subscribe logs
