@@ -91,6 +91,72 @@ namespace GameHubDesktop.Services
                 }
             }
 
+            // Check if server file has changed before downloading
+            // PERBAIKAN: Jika forceRefresh = true, skip check dan langsung download
+            bool needsDownload = forceRefresh;
+            if (!forceRefresh)
+            {
+                try
+                {
+                    var hasUpdate = await CheckForUpdateAsync();
+                    if (!hasUpdate)
+                    {
+                        LogInfo("Server file unchanged, using cache");
+                        needsDownload = false;
+                    }
+                    else
+                    {
+                        LogInfo("Server file changed, downloading...");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogInfo($"Error checking for update: {ex.Message}, will download");
+                }
+            }
+            else
+            {
+                LogInfo("Force refresh requested, downloading...");
+            }
+
+            // If file unchanged, return cached data
+            if (!needsDownload && File.Exists(OverrideCacheFile))
+            {
+                try
+                {
+                    var cached = LoadFromDisk();
+                    if (cached != null)
+                    {
+                        lock (_lock)
+                        {
+                            _cachedOverride = cached;
+                            _lastLoadTime = DateTime.UtcNow; // Update timestamp
+                        }
+                        // Update meta timestamp
+                        if (File.Exists(OverrideMetaFile))
+                        {
+                            try
+                            {
+                                var metaJson = File.ReadAllText(OverrideMetaFile);
+                                var meta = JsonSerializer.Deserialize<CacheMeta>(metaJson);
+                                if (meta != null)
+                                {
+                                    meta.Timestamp = DateTime.UtcNow;
+                                    var updatedMetaJson = JsonSerializer.Serialize(meta);
+                                    File.WriteAllText(OverrideMetaFile, updatedMetaJson);
+                                }
+                            }
+                            catch { }
+                        }
+                        return cached;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogInfo($"Error loading cached file: {ex.Message}, will download");
+                }
+            }
+
             // Download fresh data
             try
             {

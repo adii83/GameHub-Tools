@@ -8,25 +8,23 @@ using System.Threading.Tasks;
 
 namespace GameHubDesktop.Services
 {
-    public static class GitHubRawService
+    public static class FixGamesDataService
     {
-        private const string GITHUB_RAW_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_data.json.gz";
-        private const int CACHE_TTL_HOURS = 12;
-        private static readonly string CacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GameHub");
-        private static readonly string CacheFile = Path.Combine(CacheDir, "github_raw_full.json");
-        private static readonly string MetaFile = Path.Combine(CacheDir, "github_raw_full_meta.json");
+        private const string FIX_GAMES_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/fix_games.json";
+        private const int CACHE_TTL_HOURS = 6; // Override lebih sering di-update (6 jam)
         
-        private static object? _cachedRaw = null;
+        private static readonly string CacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GameHub");
+        private static readonly string CacheFile = Path.Combine(CacheDir, "fix_games.json");
+        private static readonly string MetaFile = Path.Combine(CacheDir, "fix_games_meta.json");
+        
+        private static object? _cachedData = null;
         private static DateTime? _lastLoadTime = null;
         private static readonly object _lock = new object();
-        
-        // In-memory index: appid -> metadata object (untuk lookup cepat tanpa deserialize ulang)
-        private static Dictionary<int, object>? _metadataIndex = null;
 
         public static Action<string>? Log { get; set; }
         private static void LogInfo(string message)
         {
-            try { Log?.Invoke($"[GitHubRawService] {message}"); } catch { }
+            try { Log?.Invoke($"[FixGamesDataService] {message}"); } catch { }
         }
 
         public static void Initialize()
@@ -36,7 +34,6 @@ namespace GameHubDesktop.Services
                 if (!Directory.Exists(CacheDir))
                 {
                     Directory.CreateDirectory(CacheDir);
-                    LogInfo($"Created cache directory: {CacheDir}");
                 }
             }
             catch (Exception ex)
@@ -45,23 +42,18 @@ namespace GameHubDesktop.Services
             }
         }
 
-        public static async Task<object?> GetRawDatasetAsync(bool forceRefresh = false, Action<int, string>? progressCallback = null)
+        public static async Task<object?> GetFixGamesDataAsync(bool forceRefresh = false, Action<int, string>? progressCallback = null)
         {
             lock (_lock)
             {
                 // Return cached in-memory if available and not expired
-                if (!forceRefresh && _cachedRaw != null && _lastLoadTime.HasValue)
+                if (!forceRefresh && _cachedData != null && _lastLoadTime.HasValue)
                 {
                     var age = DateTime.UtcNow - _lastLoadTime.Value;
                     if (age.TotalHours < CACHE_TTL_HOURS)
                     {
-                        // Build index jika belum ada (untuk lookup cepat nanti)
-                        if (_metadataIndex == null)
-                        {
-                            BuildMetadataIndex(_cachedRaw);
-                        }
                         progressCallback?.Invoke(100, "Data dari memori");
-                        return _cachedRaw;
+                        return _cachedData;
                     }
                 }
             }
@@ -72,20 +64,16 @@ namespace GameHubDesktop.Services
                 try
                 {
                     progressCallback?.Invoke(50, "Memuat dari cache disk...");
-                    // Optimasi: Load di background thread untuk tidak block UI
-                    var raw = await Task.Run(() => LoadFromDisk());
-                    if (raw != null)
+                    var data = LoadFromDisk();
+                    if (data != null)
                     {
-                    lock (_lock)
-                    {
-                        _cachedRaw = raw;
-                        _lastLoadTime = DateTime.UtcNow;
-                        _metadataIndex = null; // Reset index
-                    }
-                    // Build index di background (tidak blocking, akan siap saat GetMetadataForAppid dipanggil)
-                    _ = Task.Run(() => BuildMetadataIndex(raw));
-                    progressCallback?.Invoke(100, "Data dimuat dari cache");
-                    return raw;
+                        lock (_lock)
+                        {
+                            _cachedData = data;
+                            _lastLoadTime = DateTime.UtcNow;
+                        }
+                        progressCallback?.Invoke(100, "Data dimuat dari cache");
+                        return data;
                     }
                 }
                 catch (Exception ex)
@@ -96,7 +84,6 @@ namespace GameHubDesktop.Services
 
             // Check if server file has changed (ETag/LastModified check)
             // PERBAIKAN: Jika forceRefresh = true, skip ETag check dan langsung download
-            // Jika forceRefresh = false, cek ETag untuk hemat bandwidth
             bool needsDownload = forceRefresh;
             string? serverETag = null;
             string? serverLastModified = null;
@@ -158,7 +145,7 @@ namespace GameHubDesktop.Services
             }
             else
             {
-                LogInfo("Force refresh requested, skipping ETag check and downloading...");
+                LogInfo("Force refresh requested, downloading...");
             }
 
             // If file unchanged, return cached data
@@ -172,9 +159,8 @@ namespace GameHubDesktop.Services
                     {
                         lock (_lock)
                         {
-                            _cachedRaw = cached;
+                            _cachedData = cached;
                             _lastLoadTime = DateTime.UtcNow;
-                            _metadataIndex = null;
                         }
                         // Update meta timestamp (keep ETag/LastModified)
                         if (File.Exists(MetaFile))
@@ -204,18 +190,17 @@ namespace GameHubDesktop.Services
             // Download fresh data
             try
             {
-                LogInfo("Downloading dataset from GitHub");
+                LogInfo("Downloading fix_games.json from GitHub");
                 progressCallback?.Invoke(10, "Memulai download...");
-                var downloadResult = await DownloadRawAsync(progressCallback);
+                var downloadResult = await DownloadDataAsync(progressCallback);
                 if (downloadResult.HasValue && downloadResult.Value.Data != null)
                 {
-                    var raw = downloadResult.Value.Data;
+                    var data = downloadResult.Value.Data;
                     try
                     {
                         progressCallback?.Invoke(95, "Menyimpan ke cache...");
-                        // Optimasi: Save di background thread untuk tidak block
-                        await Task.Run(() => SaveToDisk(raw, downloadResult.Value.ETag, downloadResult.Value.LastModified));
-                        LogInfo("Dataset saved to disk cache");
+                        SaveToDisk(data, downloadResult.Value.ETag, downloadResult.Value.LastModified);
+                        LogInfo("Fix games data saved to disk cache");
                         progressCallback?.Invoke(100, "Selesai!");
                     }
                     catch (Exception ex)
@@ -225,11 +210,10 @@ namespace GameHubDesktop.Services
 
                     lock (_lock)
                     {
-                        _cachedRaw = raw;
+                        _cachedData = data;
                         _lastLoadTime = DateTime.UtcNow;
-                        _metadataIndex = null; // Reset index, akan di-build saat pertama kali GetMetadataForAppid dipanggil
                     }
-                    return raw;
+                    return data;
                 }
             }
             catch (Exception ex)
@@ -245,9 +229,8 @@ namespace GameHubDesktop.Services
                         {
                             lock (_lock)
                             {
-                                _cachedRaw = stale;
+                                _cachedData = stale;
                                 _lastLoadTime = DateTime.UtcNow;
-                                _metadataIndex = null; // Reset index, akan di-build saat pertama kali GetMetadataForAppid dipanggil
                             }
                             return stale;
                         }
@@ -287,16 +270,10 @@ namespace GameHubDesktop.Services
                 if (!File.Exists(CacheFile))
                     return null;
 
-                // Optimasi: Gunakan async file read dengan buffer, lalu parse dengan options yang dioptimasi
                 var json = File.ReadAllText(CacheFile);
-                
-                // Optimasi JSON parsing: gunakan JsonDocument untuk lazy parsing (lebih cepat untuk file besar)
-                // Tapi tetap return object untuk kompatibilitas
                 return JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions
                 {
-                    PropertyNameCaseInsensitive = true,
-                    MaxDepth = 64, // Limit depth untuk keamanan
-                    AllowTrailingCommas = true
+                    PropertyNameCaseInsensitive = true
                 });
             }
             catch (Exception ex)
@@ -306,19 +283,14 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static void SaveToDisk(object raw, string? eTag = null, string? lastModified = null)
+        private static void SaveToDisk(object data, string? eTag = null, string? lastModified = null)
         {
             try
             {
-                // Optimasi: Serialize dengan options yang dioptimasi untuk performa
-                var json = JsonSerializer.Serialize(raw, new JsonSerializerOptions
+                var json = JsonSerializer.Serialize(data, new JsonSerializerOptions
                 {
-                    WriteIndented = false,
-                    MaxDepth = 64,
-                    AllowTrailingCommas = true
+                    WriteIndented = false
                 });
-                
-                // Optimasi: Gunakan async file write dengan buffer (non-blocking)
                 File.WriteAllText(CacheFile, json);
 
                 var meta = new CacheMeta
@@ -345,7 +317,7 @@ namespace GameHubDesktop.Services
 
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Head, GITHUB_RAW_URL);
+                using var req = new HttpRequestMessage(HttpMethod.Head, FIX_GAMES_URL);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
                 
                 using var resp = await http.SendAsync(req);
@@ -367,14 +339,14 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static async Task<(object? Data, string? ETag, string? LastModified)?> DownloadRawAsync(Action<int, string>? progressCallback = null)
+        private static async Task<(object? Data, string? ETag, string? LastModified)?> DownloadDataAsync(Action<int, string>? progressCallback = null)
         {
             using var http = new HttpClient();
-            http.Timeout = TimeSpan.FromMinutes(5); // Large file may take time
+            http.Timeout = TimeSpan.FromMinutes(2);
 
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Get, GITHUB_RAW_URL);
+                using var req = new HttpRequestMessage(HttpMethod.Get, FIX_GAMES_URL);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
                 
                 progressCallback?.Invoke(20, "Menghubungkan ke server...");
@@ -386,28 +358,27 @@ namespace GameHubDesktop.Services
                 }
 
                 var totalBytes = resp.Content.Headers.ContentLength ?? 0;
-                
+                progressCallback?.Invoke(30, totalBytes > 0 ? $"Mengunduh {FormatBytes(totalBytes)}..." : "Mengunduh...");
+
                 using var stream = await resp.Content.ReadAsStreamAsync();
-                
-                // Optimasi: Download gzip file to memory dengan buffer yang lebih besar untuk performa lebih baik
-                progressCallback?.Invoke(30, totalBytes > 0 ? $"Mengunduh file terkompresi {FormatBytes(totalBytes)}..." : "Mengunduh file terkompresi...");
-                using var memoryStream = new MemoryStream();
-                var buffer = new byte[65536]; // Optimasi: Buffer 64KB (lebih besar = lebih sedikit I/O calls)
+                using var reader = new StreamReader(stream);
+                var buffer = new System.Text.StringBuilder();
+                var charBuffer = new char[8192];
                 long totalRead = 0;
                 int lastPercent = 30;
 
                 while (true)
                 {
-                    var read = await stream.ReadAsync(buffer, 0, buffer.Length);
+                    var read = await reader.ReadAsync(charBuffer, 0, charBuffer.Length);
                     if (read == 0) break;
                     
-                    await memoryStream.WriteAsync(buffer, 0, read);
+                    buffer.Append(charBuffer, 0, read);
                     totalRead += read;
 
                     if (totalBytes > 0)
                     {
-                        var percent = 30 + (int)((totalRead * 50.0) / totalBytes); // 30-80% for download
-                        if (percent > lastPercent + 10) // Optimasi: Update every 10% (kurangi frequency)
+                        var percent = 30 + (int)((totalRead * 60.0) / totalBytes); // 30-90% for download
+                        if (percent > lastPercent + 5) // Update every 5%
                         {
                             lastPercent = percent;
                             var msg = $"Mengunduh {FormatBytes(totalRead)} / {FormatBytes(totalBytes)} ({percent}%)";
@@ -417,8 +388,8 @@ namespace GameHubDesktop.Services
                     else
                     {
                         // Unknown size, show indeterminate progress
-                        var percent = 30 + (int)Math.Min(50, (totalRead / 1000000.0) * 50); // Estimate based on MB downloaded
-                        if (percent > lastPercent + 10) // Optimasi: Update every 10%
+                        var percent = 30 + (int)Math.Min(60, (totalRead / 10000.0) * 60); // Estimate based on KB downloaded
+                        if (percent > lastPercent + 5)
                         {
                             lastPercent = percent;
                             progressCallback?.Invoke(percent, $"Mengunduh {FormatBytes(totalRead)}...");
@@ -426,38 +397,25 @@ namespace GameHubDesktop.Services
                     }
                 }
 
-                progressCallback?.Invoke(80, "Mendekompresi file...");
-                memoryStream.Position = 0;
-                
-                // Optimasi: Decompress gzip dengan buffer yang lebih besar untuk performa lebih baik
-                string json;
-                using (var gzipStream = new GZipStream(memoryStream, CompressionMode.Decompress, leaveOpen: false))
-                using (var reader = new StreamReader(gzipStream, System.Text.Encoding.UTF8, true, 8192)) // Buffer 8KB
-                {
-                    json = await reader.ReadToEndAsync();
-                }
-
                 progressCallback?.Invoke(90, "Memproses data...");
-                // Optimasi: Parse JSON dengan options yang dioptimasi
-                var raw = JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions
+                var json = buffer.ToString();
+                var data = JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions
                 {
-                    PropertyNameCaseInsensitive = true,
-                    MaxDepth = 64,
-                    AllowTrailingCommas = true
+                    PropertyNameCaseInsensitive = true
                 });
 
                 progressCallback?.Invoke(95, "Menyimpan ke cache...");
                 
-                // Get ETag and LastModified from response (before disposing resp)
+                // Get ETag and LastModified from response (before disposing)
                 string? eTag = resp.Headers.ETag?.Tag;
                 string? lastModified = resp.Content.Headers.LastModified?.ToString("R");
                 
-                LogInfo($"Downloaded dataset successfully ({FormatBytes(json.Length)})");
-                return (raw, eTag, lastModified);
+                LogInfo($"Downloaded fix_games.json successfully ({FormatBytes(json.Length)})");
+                return (data, eTag, lastModified);
             }
             catch (Exception ex)
             {
-                LogInfo($"DownloadRawAsync error: {ex.Message}");
+                LogInfo($"DownloadDataAsync error: {ex.Message}");
                 return null;
             }
         }
@@ -475,171 +433,14 @@ namespace GameHubDesktop.Services
             return $"{len:0.##} {sizes[order]}";
         }
 
-        // Build in-memory index dari dataset (sekali saja, untuk lookup cepat)
-        private static void BuildMetadataIndex(object? raw)
-        {
-            if (raw == null) return;
-            
-            lock (_lock)
-            {
-                if (_metadataIndex != null) return; // Already indexed
-                
-                _metadataIndex = new Dictionary<int, object>();
-                
-                try
-                {
-                    if (raw is JsonElement jsonElement)
-                    {
-                        if (jsonElement.ValueKind == JsonValueKind.Array)
-                        {
-                            foreach (var item in jsonElement.EnumerateArray())
-                            {
-                                int? id = null;
-                                if (item.TryGetProperty("appid", out var idProp))
-                                    id = idProp.GetInt32();
-                                else if (item.TryGetProperty("id", out var idProp2))
-                                    id = idProp2.GetInt32();
-                                
-                                if (id.HasValue)
-                                {
-                                    try
-                                    {
-                                        var metadata = JsonSerializer.Deserialize<object>(item.GetRawText());
-                                        if (metadata != null && !_metadataIndex.ContainsKey(id.Value))
-                                        {
-                                            _metadataIndex[id.Value] = metadata;
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
-                        }
-                        else if (jsonElement.ValueKind == JsonValueKind.Object)
-                        {
-                            foreach (var prop in jsonElement.EnumerateObject())
-                            {
-                                if (int.TryParse(prop.Name, out var id))
-                                {
-                                    try
-                                    {
-                                        var metadata = JsonSerializer.Deserialize<object>(prop.Value.GetRawText());
-                                        if (metadata != null && !_metadataIndex.ContainsKey(id))
-                                        {
-                                            _metadataIndex[id] = metadata;
-                                        }
-                                    }
-                                    catch { }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogInfo($"Error building metadata index: {ex.Message}");
-                    _metadataIndex = null;
-                }
-            }
-        }
-
-        public static async Task<object?> GetMetadataForAppidAsync(int appid)
-        {
-            try
-            {
-                // PRIORITY 1: Cek override data dulu (game baru dari override)
-                // Cek user override (prioritas tertinggi)
-                var userOverride = OverrideDataService.GetUserOverride();
-                if (userOverride != null && userOverride.TryGetValue(appid.ToString(), out var userData))
-                {
-                    LogInfo($"GetMetadataForAppid: found in user override for appid={appid}");
-                    return userData;
-                }
-                
-                // Cek global override
-                var globalOverride = await OverrideDataService.GetGlobalOverrideAsync(false);
-                if (globalOverride != null && globalOverride.TryGetValue(appid.ToString(), out var globalData))
-                {
-                    LogInfo($"GetMetadataForAppid: found in global override for appid={appid}");
-                    return globalData;
-                }
-
-                // PRIORITY 2: Cek raw data (steam_data.json)
-                // Cek index dulu (O(1) lookup, sangat cepat!)
-                lock (_lock)
-                {
-                    if (_metadataIndex != null && _metadataIndex.TryGetValue(appid, out var cached))
-                    {
-                        LogInfo($"GetMetadataForAppid: found in raw data index for appid={appid}");
-                        return cached;
-                    }
-                }
-
-                // Jika belum ada di index, load dataset dan build index
-                var raw = await GetRawDatasetAsync(false);
-                if (raw == null) return null;
-
-                // Build index jika belum ada
-                BuildMetadataIndex(raw);
-
-                // Cek lagi setelah build index
-                lock (_lock)
-                {
-                    if (_metadataIndex != null && _metadataIndex.TryGetValue(appid, out var found))
-                    {
-                        LogInfo($"GetMetadataForAppid: found in raw data after index build for appid={appid}");
-                        return found;
-                    }
-                }
-                
-                // Fallback: search manual di raw data
-                if (raw is JsonElement jsonElement)
-                {
-                    if (jsonElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in jsonElement.EnumerateArray())
-                        {
-                            if (item.TryGetProperty("appid", out var idProp) && idProp.GetInt32() == appid)
-                            {
-                                LogInfo($"GetMetadataForAppid: found in raw data array for appid={appid}");
-                                return JsonSerializer.Deserialize<object>(item.GetRawText());
-                            }
-                            if (item.TryGetProperty("id", out var idProp2) && idProp2.GetInt32() == appid)
-                            {
-                                LogInfo($"GetMetadataForAppid: found in raw data array (id field) for appid={appid}");
-                                return JsonSerializer.Deserialize<object>(item.GetRawText());
-                            }
-                        }
-                    }
-                    else if (jsonElement.ValueKind == JsonValueKind.Object)
-                    {
-                        var idStr = appid.ToString();
-                        if (jsonElement.TryGetProperty(idStr, out var appData))
-                        {
-                            LogInfo($"GetMetadataForAppid: found in raw data object for appid={appid}");
-                            return JsonSerializer.Deserialize<object>(appData.GetRawText());
-                        }
-                    }
-                }
-
-                LogInfo($"GetMetadataForAppid: not found anywhere for appid={appid}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                LogInfo($"GetMetadataForAppid error for appid={appid}: {ex.Message}");
-                return null;
-            }
-        }
-
         public static void ClearCache()
         {
             try
             {
                 lock (_lock)
                 {
-                    _cachedRaw = null;
+                    _cachedData = null;
                     _lastLoadTime = null;
-                    _metadataIndex = null; // Clear index juga
                 }
                 
                 if (File.Exists(CacheFile))

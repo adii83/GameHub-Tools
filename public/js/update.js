@@ -9,30 +9,59 @@ async function loadGames() {
   btn.innerHTML = '<span>⏳</span><span>Loading...</span>';
   
   try {
-    // Check update untuk override data dulu
-    if (window.desktopBridge && typeof window.desktopBridge.checkOverrideUpdate === 'function') {
-      const result = await window.desktopBridge.checkOverrideUpdate();
-      
-      if (result.hasUpdate) {
-        // Ada update override tersedia
-        const shouldUpdate = await premiumConfirm(
-          `Ada update override data tersedia. Update sekarang?\n\nTerakhir update: ${result.lastUpdate || 'Tidak diketahui'}`,
-          'Update Tersedia'
-        );
-        if (shouldUpdate) {
-          await forceUpdateOverride();
+    // PERBAIKAN: Force refresh semua data (override, steam data, fix games)
+    
+    // 1. Force update override data
+    if (window.desktopBridge && typeof window.desktopBridge.forceUpdateOverride === 'function') {
+      try {
+        const result = await window.desktopBridge.forceUpdateOverride();
+        if (!result.success) {
+          console.warn('Force update override failed:', result.error);
         }
+      } catch (e) {
+        console.warn('Force update override error:', e);
       }
     }
     
-    // Reload game data (raw data + override)
+    // 2. Clear fix games cache dan force refresh
+    if (window.FixGamesPageCache) {
+      try {
+        window.FixGamesPageCache.clear();
+      } catch (e) {
+        console.warn('Failed to clear fix games cache:', e);
+      }
+    }
+    // Force refresh fix games data via bridge
+    if (window.desktopBridge && typeof window.desktopBridge.getFixGamesData === 'function') {
+      try {
+        await window.desktopBridge.getFixGamesData(true); // forceRefresh = true
+      } catch (e) {
+        console.warn('Force refresh fix games failed:', e);
+      }
+    }
+    
+    // 3. Steam data (raw dataset) - PERBAIKAN: Gunakan ETag check, tidak force refresh
+    // Untuk steam_data.json.gz yang besar, kita cek ETag dulu
+    // Hanya download jika file berubah di server
+    // Clear JavaScript cache untuk memastikan data ter-reload
+    if (window.GamesPageCache) {
+      try {
+        window.GamesPageCache.clear();
+      } catch (e) {
+        console.warn('Failed to clear games page cache:', e);
+      }
+    }
+    
+    // Load steam data dengan ETag check (tidak force refresh)
+    // Ini akan cek ETag dulu, jika tidak berubah, gunakan cache
+    // Jika berubah, download fresh
     if (typeof refreshGithubRaw === 'function') {
-      await refreshGithubRaw();
-      // refreshGithubRaw sudah pakai showTransientMessage, tapi kita ganti dengan modal
+      await refreshGithubRaw(false); // false = gunakan ETag check, tidak force refresh
       if (typeof premiumAlert === 'function') {
         premiumAlert('Game data berhasil dimuat ulang!', 'Berhasil');
       }
     } else if (typeof initGamesPage === 'function') {
+      // Fallback: init dengan ETag check
       await initGamesPage();
       if (typeof premiumAlert === 'function') {
         premiumAlert('Game data berhasil dimuat ulang!', 'Berhasil');
@@ -87,7 +116,7 @@ async function forceUpdateOverride() {
           }
         } catch (e) {
           if (typeof premiumAlert === 'function') {
-            premiumAlert('Override data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
+            premiumAlert('Data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
           }
           setTimeout(() => {
             window.location.reload();
@@ -96,7 +125,7 @@ async function forceUpdateOverride() {
       } else {
         // Fallback: reload page
         if (typeof premiumAlert === 'function') {
-          premiumAlert('Override data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
+          premiumAlert('Data berhasil di-update! Aplikasi akan reload...', 'Berhasil');
         }
         setTimeout(() => {
           window.location.reload();

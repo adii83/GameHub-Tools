@@ -129,9 +129,23 @@ function applyLocalOverridesToItem(rawItem, localItem) {
       'developers','publishers','release_date','price_display','price_normalized','price_initial','protection','last_update'
     ];
     for (const k of keys) {
-      if (Object.prototype.hasOwnProperty.call(localItem, k)) {
-        merged[k] = localItem[k];
+      // PERBAIKAN: Hanya override jika field benar-benar ada di override (tidak undefined)
+      // Ini memastikan partial update tidak menghapus field lain
+      // Cek apakah field ada di localItem DAN nilainya tidak undefined
+      // hasOwnProperty cek apakah property ada, tapi kita juga perlu cek nilainya
+      if (Object.prototype.hasOwnProperty.call(localItem, k) && localItem[k] !== undefined) {
+        const overrideValue = localItem[k];
+        // Untuk protection, null adalah nilai valid (non-denuvo)
+        if (k === 'protection') {
+          // Jika override punya protection (true/false/null), gunakan override
+          merged[k] = overrideValue;
+        } else {
+          // Untuk field lain, hanya override jika nilai tidak undefined
+          // Kita sudah cek di atas, jadi langsung assign
+          merged[k] = overrideValue;
+        }
       }
+      // Jika field tidak ada di override ATAU nilainya undefined, skip (keep dari rawItem)
     }
     merged.appid = Number(merged.appid || localItem.appid || rawItem.appid || 0);
     const pn = Number(merged.price_normalized ?? merged.price_initial ?? 0) || 0;
@@ -168,13 +182,43 @@ async function mergeWithLocalDataset(arr) {
     if (!(localMap && localMap.size)) return arr;
     const byId = new Map();
     const out = [];
+    
+    // PERBAIKAN: Batch processing untuk array besar agar tidak block UI
+    const BATCH_SIZE = 2000; // Process 2000 items per batch
+    const isLarge = arr.length > BATCH_SIZE;
+    
     // First: process existing items from raw data and apply overrides
-    for (const it of arr) {
-      const id = Number(it.appid || it.id);
-      byId.set(id, true);
-      const local = localMap.get(id);
-      out.push(local ? applyLocalOverridesToItem(it, local) : it);
+    if (isLarge) {
+      // Batch processing dengan yield ke event loop
+      for (let i = 0; i < arr.length; i += BATCH_SIZE) {
+        const batch = arr.slice(i, i + BATCH_SIZE);
+        for (const it of batch) {
+          const id = Number(it.appid || it.id);
+          byId.set(id, true);
+          const local = localMap.get(id);
+          out.push(local ? applyLocalOverridesToItem(it, local) : it);
+        }
+        // Yield ke event loop setiap batch untuk tidak block UI
+        if (i + BATCH_SIZE < arr.length) {
+          await new Promise(resolve => {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(() => resolve(), { timeout: 50 });
+            } else {
+              setTimeout(resolve, 0);
+            }
+          });
+        }
+      }
+    } else {
+      // Array kecil, process langsung
+      for (const it of arr) {
+        const id = Number(it.appid || it.id);
+        byId.set(id, true);
+        const local = localMap.get(id);
+        out.push(local ? applyLocalOverridesToItem(it, local) : it);
+      }
     }
+    
     // Then: add new items from override that don't exist in raw data
     let addedCount = 0;
     for (const [id, local] of localMap.entries()) {
@@ -375,53 +419,153 @@ function getBuiltCache() {
 }
 
 // Normalize games array and prepare originalData + pageCache
-function normalizeAndPrepareGames(arr, shuffle = true) {
+// PERBAIKAN: Batch processing untuk tidak block UI, terutama saat aplikasi di background
+async function normalizeAndPrepareGames(arr, shuffle = true) {
   try {
     if (!Array.isArray(arr)) return [];
-    // normalize entries
-    const out = arr.map((g) => {
-      const copy = Object.assign({}, g);
-      copy.appid = Number(copy.appid || copy.id || 0);
-      copy.title = String(copy.title || copy.name || '');
-      // normalize header candidates
-        // header_candidates no longer used; ensure header exists only
-      // normalize price
-      copy.price_normalized = Number(copy.price_normalized ?? copy.price_initial ?? 0) || 0;
-      // keep price_initial for compatibility with other modules
-      copy.price_initial = Number(copy.price_initial ?? copy.price_normalized) || copy.price_normalized;
-      // protection: per user, true => denuvo, null => non-denuvo
-      copy.protection = (copy.protection === true) ? true : false;
-      // tier based on price threshold 350000
-      copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
-      return copy;
-    });
+    
+    const BATCH_SIZE = 1000; // Process 1000 items per batch
+    const isLarge = arr.length > BATCH_SIZE;
+    
+    // normalize entries - batch processing untuk array besar
+    let out = [];
+    if (isLarge) {
+      // Process dalam batches dengan yield ke event loop
+      for (let i = 0; i < arr.length; i += BATCH_SIZE) {
+        const batch = arr.slice(i, i + BATCH_SIZE);
+        const normalizedBatch = batch.map((g) => {
+          const copy = Object.assign({}, g);
+          copy.appid = Number(copy.appid || copy.id || 0);
+          copy.title = String(copy.title || copy.name || '');
+          // normalize price
+          copy.price_normalized = Number(copy.price_normalized ?? copy.price_initial ?? 0) || 0;
+          copy.price_initial = Number(copy.price_initial ?? copy.price_normalized) || copy.price_normalized;
+          // protection: per user, true => denuvo, null/false => non-denuvo
+          if (copy.protection === true) {
+            copy.protection = true; // Denuvo
+          } else if (copy.protection === false) {
+            copy.protection = false; // Explicitly non-denuvo
+          } else {
+            copy.protection = null; // Unknown/null = non-denuvo (default)
+          }
+          // tier based on price threshold 350000
+          copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
+          return copy;
+        });
+        out = out.concat(normalizedBatch);
+        
+        // Yield ke event loop setiap batch untuk tidak block UI
+        if (i + BATCH_SIZE < arr.length) {
+          await new Promise(resolve => {
+            if (window.requestIdleCallback) {
+              window.requestIdleCallback(() => resolve(), { timeout: 50 });
+            } else {
+              setTimeout(resolve, 0);
+            }
+          });
+        }
+      }
+    } else {
+      // Array kecil, process langsung
+      out = arr.map((g) => {
+        const copy = Object.assign({}, g);
+        copy.appid = Number(copy.appid || copy.id || 0);
+        copy.title = String(copy.title || copy.name || '');
+        copy.price_normalized = Number(copy.price_normalized ?? copy.price_initial ?? 0) || 0;
+        copy.price_initial = Number(copy.price_initial ?? copy.price_normalized) || copy.price_normalized;
+        if (copy.protection === true) {
+          copy.protection = true;
+        } else if (copy.protection === false) {
+          copy.protection = false;
+        } else {
+          copy.protection = null;
+        }
+        copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
+        return copy;
+      });
+    }
 
     // shuffle once for randomized presentation but keep pages stable afterwards
+    // PERBAIKAN: Batch shuffle untuk array besar
     if (shuffle) {
-      for (let i = out.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [out[i], out[j]] = [out[j], out[i]];
+      if (isLarge) {
+        // Shuffle dalam batches untuk tidak block UI
+        const SHUFFLE_BATCH_SIZE = 500;
+        for (let batchStart = out.length - 1; batchStart > 0; batchStart -= SHUFFLE_BATCH_SIZE) {
+          const batchEnd = Math.max(0, batchStart - SHUFFLE_BATCH_SIZE);
+          for (let i = batchStart; i > batchEnd; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [out[i], out[j]] = [out[j], out[i]];
+          }
+          // Yield ke event loop setiap batch shuffle
+          if (batchEnd > 0) {
+            await new Promise(resolve => {
+              if (window.requestIdleCallback) {
+                window.requestIdleCallback(() => resolve(), { timeout: 50 });
+              } else {
+                setTimeout(resolve, 0);
+              }
+            });
+          }
+        }
+      } else {
+        // Array kecil, shuffle langsung
+        for (let i = out.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [out[i], out[j]] = [out[j], out[i]];
+        }
       }
     }
 
     // assign to originalData and filteredData
-    originalData = out.slice();
-    filteredData = originalData;
+    // PERBAIKAN: Untuk array besar, defer slice untuk tidak block UI
+    if (isLarge && out.length > 10000) {
+      // Defer assignment untuk array sangat besar (yield ke event loop)
+      await new Promise(resolve => {
+        if (window.requestIdleCallback) {
+          window.requestIdleCallback(() => {
+            originalData = out.slice();
+            filteredData = originalData;
+            resolve();
+          }, { timeout: 100 });
+        } else {
+          setTimeout(() => {
+            originalData = out.slice();
+            filteredData = originalData;
+            resolve();
+          }, 0);
+        }
+      });
+    } else {
+      originalData = out.slice();
+      filteredData = originalData;
+    }
 
     // prefill pageCache for stable paging (PAGE_SIZE per page)
-    try {
-      Object.keys(pageCache).forEach(k => delete pageCache[k]);
-      const totalPages = Math.ceil(originalData.length / PAGE_SIZE) || 0;
-      for (let p = 1; p <= totalPages; p++) {
-        const start = (p - 1) * PAGE_SIZE;
-        pageCache[p] = originalData.slice(start, start + PAGE_SIZE);
-      }
-      savePageCache();
-    } catch (e) {}
+    // PERBAIKAN: Defer pageCache prefill untuk tidak block UI
+    setTimeout(() => {
+      try {
+        Object.keys(pageCache).forEach(k => delete pageCache[k]);
+        const totalPages = Math.ceil(originalData.length / PAGE_SIZE) || 0;
+        for (let p = 1; p <= totalPages; p++) {
+          const start = (p - 1) * PAGE_SIZE;
+          pageCache[p] = originalData.slice(start, start + PAGE_SIZE);
+        }
+        savePageCache();
+      } catch (e) {}
+    }, 0);
 
-    loadGenreList(originalData);
+    // Defer loadGenreList untuk tidak block UI
+    setTimeout(() => {
+      try {
+        loadGenreList(originalData);
+      } catch (e) {}
+    }, 0);
+    
     return out;
-  } catch (e) { return []; }
+  } catch (e) { 
+    return []; 
+  }
 }
 
 // Load remote canonical JSON (GitHub raw or other raw URL) and prepare dataset
@@ -434,7 +578,7 @@ async function loadRemoteGameList(url) {
     let arr = Array.isArray(raw) ? raw : Object.values(raw || {});
     // Merge local overrides/additions
     arr = await mergeWithLocalDataset(arr);
-    const prepared = normalizeAndPrepareGames(arr, true);
+    const prepared = await normalizeAndPrepareGames(arr, true);
     // persist the manual url so future visits load the same
     try { localStorage.setItem('gamehub_manual_raw', url); } catch (e) {}
 
@@ -478,6 +622,48 @@ function addBuiltCache(id) {
 async function initGamesPage() {
   // Load persisted page cache (if any) so navigation can be instant
   try { loadPageCache(); } catch(e) {}
+  
+  // OPTIMASI: Cek cache dulu sebelum load data
+  if (window.GamesPageCache && window.GamesPageCache.isValid()) {
+    const cached = window.GamesPageCache.get();
+    if (cached && cached.originalData && cached.filteredData) {
+      // Restore dari cache (instant, tidak perlu loading)
+      // Defer restore untuk tidak block UI
+      if (window.requestIdleCallback) {
+        await new Promise(resolve => window.requestIdleCallback(() => resolve(), { timeout: 100 }));
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      originalData = cached.originalData;
+      // PERBAIKAN: Reset filteredData ke originalData untuk memastikan library filter tidak aktif
+      // Jangan gunakan cached.filteredData karena mungkin masih ter-filter oleh library
+      filteredData = originalData.slice();
+      
+      // Defer loadGenreList untuk tidak block UI
+      setTimeout(() => {
+        try {
+          loadGenreList(originalData);
+        } catch (e) {}
+      }, 0);
+      
+      // PERBAIKAN: Apply filters lagi untuk memastikan library filter tidak aktif
+      if (typeof applyFilters === 'function') {
+        // Defer apply filters untuk tidak block UI
+        setTimeout(() => {
+          try {
+            applyFilters(false); // false = jangan render lagi, karena sudah render di bawah
+          } catch (e) {
+            console.warn('Error applying filters after cache restore:', e);
+          }
+        }, 50);
+      }
+      
+      try { await renderPage(1); } catch (e) {}
+      try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
+      return; // Skip loading, langsung render dari cache
+    }
+  }
+  
   showSkeleton();
 
   // Raw-only init: muat daftar RAW GitHub sebagai data awal via desktop bridge
@@ -524,7 +710,49 @@ async function initGamesPage() {
     if (full && (Array.isArray(full) || (full && typeof full === 'object'))) {
       let arr = Array.isArray(full) ? full : Object.values(full || {});
       arr = await mergeWithLocalDataset(arr);
-      const prepared = normalizeAndPrepareGames(arr, true);
+      
+      // OPTIMASI: Process data dengan batch processing untuk tidak block UI
+      progressWrapper?.(95, 'Memproses data...');
+      
+      // PERBAIKAN: Yield ke event loop sebelum normalize untuk tidak block UI
+      await new Promise(resolve => {
+        if (window.requestIdleCallback) {
+          window.requestIdleCallback(() => resolve(), { timeout: 100 });
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
+      
+      // normalizeAndPrepareGames sekarang async dan menggunakan batch processing
+      const prepared = await normalizeAndPrepareGames(arr, true);
+      
+      // PERBAIKAN: Reset filteredData ke originalData untuk memastikan library filter tidak aktif
+      filteredData = originalData.slice();
+      
+      // OPTIMASI: Simpan ke cache setelah load (hanya memory untuk data besar)
+      if (window.GamesPageCache) {
+        // Defer cache save untuk tidak block UI
+        setTimeout(() => {
+          try {
+            window.GamesPageCache.set(originalData, filteredData);
+          } catch (e) {
+            console.warn('Failed to save games cache:', e);
+          }
+        }, 0);
+      }
+      
+      // PERBAIKAN: Apply filters lagi untuk memastikan library filter tidak aktif
+      if (typeof applyFilters === 'function') {
+        // Defer apply filters untuk tidak block UI
+        setTimeout(() => {
+          try {
+            applyFilters(false); // false = jangan render lagi, karena akan render di bawah
+          } catch (e) {
+            console.warn('Error applying filters after normalize:', e);
+          }
+        }, 50);
+      }
+      
       // Log sumber dataset ke AppLog (jelas bahwa ini dari bridge/disk)
       try {
         if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
@@ -543,8 +771,26 @@ async function initGamesPage() {
     const sample = await fetch('/data/sample_page.json').then(r => r.json()).catch(() => null);
     if (Array.isArray(sample) && sample.length) {
       originalData = sample;
-      filteredData = sample;
-      loadGenreList(originalData);
+      // PERBAIKAN: Reset filteredData ke originalData untuk memastikan library filter tidak aktif
+      filteredData = originalData.slice();
+      
+      // PERBAIKAN: Apply filters lagi untuk memastikan library filter tidak aktif
+      if (typeof applyFilters === 'function') {
+        setTimeout(() => {
+          try {
+            applyFilters(false);
+          } catch (e) {
+            console.warn('Error applying filters after sample load:', e);
+          }
+        }, 50);
+      }
+      
+      // Defer loadGenreList untuk tidak block UI
+      setTimeout(() => {
+        try {
+          loadGenreList(originalData);
+        } catch (e) {}
+      }, 0);
       await renderPage(1);
       try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
       return;
@@ -556,13 +802,11 @@ async function initGamesPage() {
 
 // Refresh manual: force reload dari bridge (disk cache akan di-update jika expired)
 // Juga digunakan setelah update override data untuk reload dataset dengan override baru
-async function refreshGithubRaw() {
+async function refreshGithubRaw(forceRefresh = false) {
   try {
     showBlockingOverlay('Memeriksa pembaruan data...', { showProgress: true });
-    // Force refresh via bridge (akan download jika cache expired)
-    // Tapi untuk override, kita tidak perlu force refresh raw data
-    // Cukup reload dengan override yang sudah ter-update
-    const full = await fetchGithubFullRaw(false); // false = gunakan cache, tapi override sudah ter-update
+    // Force refresh via bridge jika forceRefresh = true
+    const full = await fetchGithubFullRaw(forceRefresh); // forceRefresh = true untuk download ulang
     hideBlockingOverlay();
     if (!full || (!Array.isArray(full) && typeof full !== 'object')) {
       showTransientMessage('Data tidak tersedia.', 4000, 'error');
@@ -571,18 +815,45 @@ async function refreshGithubRaw() {
     // Normalize dan update dataset (akan merge dengan override yang baru)
     let arr = Array.isArray(full) ? full : Object.values(full || {});
     arr = await mergeWithLocalDataset(arr); // Ini akan load override yang baru
-    const prepared = normalizeAndPrepareGames(arr, true);
+    
+    // PERBAIKAN: Yield ke event loop sebelum normalize untuk tidak block UI
+    await new Promise(resolve => {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(() => resolve(), { timeout: 100 });
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+    
+    const prepared = await normalizeAndPrepareGames(arr, true);
     
     // Update global data
     originalData = prepared;
-    filteredData = prepared;
+    // PERBAIKAN: Reset filteredData ke originalData untuk memastikan library filter tidak aktif
+    filteredData = originalData.slice();
     
     // Clear page cache
     Object.keys(pageCache).forEach(k => delete pageCache[k]);
     
-    // Load genre list
+    // PERBAIKAN: Apply filters lagi untuk memastikan library filter tidak aktif
+    if (typeof applyFilters === 'function') {
+      // Defer apply filters untuk tidak block UI
+      setTimeout(() => {
+        try {
+          applyFilters(false); // false = jangan render lagi, karena akan render di bawah
+        } catch (e) {
+          console.warn('Error applying filters after refresh:', e);
+        }
+      }, 50);
+    }
+    
+    // Defer loadGenreList untuk tidak block UI
     if (typeof loadGenreList === 'function') {
-      loadGenreList(originalData);
+      setTimeout(() => {
+        try {
+          loadGenreList(originalData);
+        } catch (e) {}
+      }, 0);
     }
     
     try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}

@@ -422,8 +422,25 @@ async function toggleLibraryFilter() {
       window.libraryFilterActive = true;
       applyFilters(true);
       
-      if (typeof showTransientMessage === 'function') {
-        showTransientMessage(`Menampilkan ${libraryAppIds.size} game dari Library`, 3000, 'success');
+      // OPTIMASI: Tampilkan library message hanya sekali saat pertama kali buka library page
+      // Cek apakah sudah pernah tampil sebelumnya
+      const LIBRARY_MESSAGE_SHOWN_KEY = 'gamehub_library_message_shown';
+      const lastShownCount = localStorage.getItem(LIBRARY_MESSAGE_SHOWN_KEY);
+      const currentCount = libraryAppIds.size.toString();
+      
+      // Tampilkan hanya jika:
+      // 1. Belum pernah ditampilkan sebelumnya, ATAU
+      // 2. Jumlah game berubah (ada data terbaru)
+      if (!lastShownCount || lastShownCount !== currentCount) {
+        if (typeof showTransientMessage === 'function') {
+          showTransientMessage(`Menampilkan ${libraryAppIds.size} game dari Library`, 3000, 'success');
+        }
+        // Simpan flag bahwa sudah ditampilkan dengan jumlah game saat ini
+        try {
+          localStorage.setItem(LIBRARY_MESSAGE_SHOWN_KEY, currentCount);
+        } catch (e) {
+          // Ignore localStorage error
+        }
       }
     } catch (e) {
       if (typeof showTransientMessage === 'function') {

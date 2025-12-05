@@ -475,7 +475,7 @@ namespace GameHubDesktop.Services
             {
                 try
                 {
-                    Application.Current?.Dispatcher?.Invoke(() =>
+                    System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
                     {
                         try { originalSend(payload).GetAwaiter().GetResult(); }
                         catch (Exception inner) { LogInfo($"SafeSend dispatcher gagal: {inner.Message}"); }

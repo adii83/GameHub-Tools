@@ -13,6 +13,7 @@ namespace GameHubDesktop
         private string _baseDir = string.Empty;
         private readonly Services.OnlineFixService _onlineFix = new Services.OnlineFixService();
         private readonly Services.AppLogService _appLog = new Services.AppLogService();
+        private readonly Services.FixGamesService _fixGames = new Services.FixGamesService();
         private bool _logSubscribed = false;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _appliedCache = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
 
@@ -40,9 +41,12 @@ namespace GameHubDesktop
                 Services.GitHubRawService.Log = (msg) => _appLog.Append(msg);
                 Services.OverrideDataService.Initialize();
                 Services.OverrideDataService.Log = (msg) => _appLog.Append(msg);
+                Services.FixGamesDataService.Initialize();
+                Services.FixGamesDataService.Log = (msg) => _appLog.Append(msg);
                 _onlineFix.Log = (msg) => _appLog.Append(msg);
                 Services.AddGameService.Log = (msg) => _appLog.Append(msg);
                 Services.SteamService.Log = (msg) => _appLog.Append(msg);
+                _fixGames.Log = (msg) => _appLog.Append(msg);
                 var env = await CoreWebView2Environment.CreateAsync();
                 await WebView.EnsureCoreWebView2Async(env);
 
@@ -55,7 +59,7 @@ namespace GameHubDesktop
                 }
                 if (dirInfo == null)
                 {
-                    MessageBox.Show("Folder 'gamehub' tidak ditemukan dari base: " + baseDir, "Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show("Folder 'gamehub' tidak ditemukan dari base: " + baseDir, "Startup Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
                     return;
                 }
                 _baseDir = dirInfo.FullName; // .../gamehub
@@ -63,7 +67,7 @@ namespace GameHubDesktop
                 string appRoot = _appRoot;
                 if (!System.IO.Directory.Exists(appRoot))
                 {
-                    MessageBox.Show("Folder 'public' tidak ditemukan: " + appRoot, "Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    System.Windows.MessageBox.Show("Folder 'public' tidak ditemukan: " + appRoot, "Startup Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
                     return;
                 }
 
@@ -188,7 +192,7 @@ namespace GameHubDesktop
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Inisialisasi WebView2 gagal: " + ex.Message, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show("Inisialisasi WebView2 gagal: " + ex.Message, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             }
         }
 
@@ -485,6 +489,22 @@ namespace GameHubDesktop
                         SendToJs(res);
                         break;
                     }
+                    case "ClearRawCache":
+                    {
+                        try
+                        {
+                            _appLog.Append("Clearing raw dataset cache...");
+                            Services.GitHubRawService.ClearCache();
+                            _appLog.Append("Raw dataset cache cleared");
+                            SendToJs(new { type = "RawCacheCleared", success = true });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"ClearRawCache error: {ex.Message}");
+                            SendToJs(new { type = "RawCacheCleared", success = false, error = ex.Message });
+                        }
+                        break;
+                    }
                     case "GetRawDataset":
                     {
                         var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
@@ -521,6 +541,33 @@ namespace GameHubDesktop
                         else
                         {
                             SendToJs(new { type = "MetadataForAppid", appid = appidStr, data = (object?)null, error = "Invalid appid" });
+                        }
+                        break;
+                    }
+                    case "GetFixGamesData":
+                    {
+                        try
+                        {
+                            _appLog.Append("GetFixGamesData requested");
+                            var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
+                            var data = await Services.FixGamesDataService.GetFixGamesDataAsync(forceRefresh, (percent, message) =>
+                            {
+                                try
+                                {
+                                    SendToJs(new { type = "FixGamesDataProgress", percent, message });
+                                }
+                                catch (Exception ex)
+                                {
+                                    _appLog.Append($"[GetFixGamesData] Progress error: {ex.Message}");
+                                }
+                            });
+                            _appLog.Append($"GetFixGamesData completed, data: {(data != null ? "not null" : "null")}");
+                            SendToJs(new { type = "FixGamesData", data = data });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetFixGamesData error: {ex.Message}");
+                            SendToJs(new { type = "FixGamesData", data = (object?)null, error = ex.Message });
                         }
                         break;
                     }
@@ -697,6 +744,290 @@ namespace GameHubDesktop
                         }
                         break;
                     }
+                    case "FixGamesCheckAntivirus":
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var result = await _fixGames.CheckAntivirusAsync();
+                                System.Windows.Application.Current?.Dispatcher?.Invoke(() => SendToJs(result), System.Windows.Threading.DispatcherPriority.Normal);
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"FixGamesCheckAntivirus error: {ex.Message}");
+                                // Send error response instead of throwing
+                                var errorResponse = new
+                                {
+                                    type = "FixGamesAntivirusCheck",
+                                    success = false,
+                                    error = ex.Message,
+                                    hasWindowsDefender = false,
+                                    hasOtherAntivirus = false
+                                };
+                                System.Windows.Application.Current?.Dispatcher?.Invoke(() => SendToJs(errorResponse), System.Windows.Threading.DispatcherPriority.Normal);
+                            }
+                        });
+                        break;
+                    }
+                    case "FixGamesAutoExclude":
+                    {
+                        var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : string.Empty;
+                        if (string.IsNullOrWhiteSpace(gamePath))
+                        {
+                            SendToJs(new { type = "FixGamesAutoExclude", success = false, error = "Path tidak valid" });
+                            break;
+                        }
+                        _ = Task.Run(async () =>
+                        {
+                            var result = await _fixGames.AutoExcludePathAsync(gamePath);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesSelectManualPath":
+                    {
+                        string? selectedPath = null;
+                        try
+                        {
+                            // Buka dialog pemilihan folder di UI thread
+                            System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+                            {
+                                try
+                                {
+                                    using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
+                                    {
+                                        dlg.Description = "Pilih folder instalasi game (steamapps\\common\\NamaGame)";
+                                        dlg.ShowNewFolderButton = false;
+                                        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                                        {
+                                            selectedPath = dlg.SelectedPath;
+                                        }
+                                    }
+                                }
+                                catch (Exception ex2)
+                                {
+                                    _appLog.Append($"FixGamesSelectManualPath dialog error: {ex2.Message}");
+                                }
+                            }, System.Windows.Threading.DispatcherPriority.Normal);
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"FixGamesSelectManualPath error: {ex.Message}");
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(selectedPath))
+                        {
+                            SendToJs(new
+                            {
+                                type = "FixGamesManualPathSelected",
+                                success = true,
+                                path = selectedPath
+                            });
+                        }
+                        else
+                        {
+                            SendToJs(new
+                            {
+                                type = "FixGamesManualPathSelected",
+                                success = false,
+                                error = "Pemilihan folder dibatalkan atau tidak ada folder yang dipilih."
+                            });
+                        }
+                        break;
+                    }
+                    case "FixGamesDetectPath":
+                    {
+                        // Robust parsing untuk appid: bisa dikirim sebagai number atau string dari JS
+                        int appid = 0;
+                        if (msg.payload.TryGetProperty("appid", out var a))
+                        {
+                            try
+                            {
+                                if (a.ValueKind == JsonValueKind.Number && a.TryGetInt32(out var num))
+                                {
+                                    appid = num;
+                                }
+                                else if (a.ValueKind == JsonValueKind.String)
+                                {
+                                    var s = a.GetString();
+                                    _ = int.TryParse(s, out appid);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"FixGamesDetectPath appid parse error: {ex.Message}");
+                                appid = 0;
+                            }
+                        }
+
+                        var gameTitle = msg.payload.TryGetProperty("gameTitle", out var gt) ? gt.GetString() ?? string.Empty : string.Empty;
+
+                        if (appid <= 0)
+                        {
+                            SendToJs(new
+                            {
+                                type = "FixGamesDetectPath",
+                                success = false,
+                                error = "AppID tidak valid",
+                                gameNotInstalled = true,
+                                message = "Game mungkin belum Anda install atau tidak ditemukan di Steam library. Silakan cari folder game secara manual atau pastikan game sudah terinstall di Steam."
+                            });
+                            break;
+                        }
+
+                        _appLog.Append($"FixGamesDetectPath mulai appid={appid}");
+                        try
+                        {
+                            // Panggil service secara async, lanjutannya tetap di UI thread (seperti CheckOnlineFix)
+                            var result = await _fixGames.DetectGamePathAsync(appid, gameTitle ?? "");
+
+                            // Log hasil success/fail untuk debugging
+                            try
+                            {
+                                var resultType = result.GetType();
+                                var successProp = resultType.GetProperty("success");
+                                var successValue = successProp?.GetValue(result) ?? false;
+                                _appLog.Append($"FixGamesDetectPath result: success={successValue}");
+                            }
+                            catch { }
+
+                            // Kirim ke JS dari UI thread
+                            SendToJs(result);
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"FixGamesDetectPath error: {ex.Message}");
+                            var errorResponse = new
+                            {
+                                type = "FixGamesDetectPath",
+                                success = false,
+                                gameNotInstalled = true,
+                                error = ex.Message,
+                                message = "Game mungkin belum Anda install atau tidak ditemukan di Steam library. Silakan cari folder game secara manual atau pastikan game sudah terinstall di Steam."
+                            };
+                            SendToJs(errorResponse);
+                        }
+                        break;
+                    }
+                    case "FixGamesDownload":
+                    {
+                        // appid bisa dikirim sebagai number atau string
+                        int appid = 0;
+                        if (msg.payload.TryGetProperty("appid", out var a))
+                        {
+                            try
+                            {
+                                if (a.ValueKind == JsonValueKind.Number && a.TryGetInt32(out var num))
+                                {
+                                    appid = num;
+                                }
+                                else if (a.ValueKind == JsonValueKind.String)
+                                {
+                                    var s = a.GetString();
+                                    _ = int.TryParse(s, out appid);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"FixGamesDownload appid parse error: {ex.Message}");
+                                appid = 0;
+                            }
+                        }
+
+                        var files = msg.payload.TryGetProperty("files", out var f) ? f : default;
+                        if (appid <= 0 || files.ValueKind != JsonValueKind.Array)
+                        {
+                            SendToJs(new { type = "FixGamesDownloadError", error = "Parameter tidak valid" });
+                            break;
+                        }
+                        _ = Task.Run(async () =>
+                        {
+                            Func<object, Task> sendProgress = async (obj) =>
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(obj));
+                            };
+                            var result = await _fixGames.DownloadFilesAsync(appid, files, sendProgress);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesExtract":
+                    {
+                        var downloadPath = msg.payload.TryGetProperty("downloadPath", out var dp) ? dp.GetString() : string.Empty;
+                        var filesJson = msg.payload.TryGetProperty("files", out var f) ? f : default;
+                        var password = msg.payload.TryGetProperty("password", out var p) ? p.GetString() : string.Empty;
+                        
+                        var files = new List<string>();
+                        if (filesJson.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var file in filesJson.EnumerateArray())
+                            {
+                                if (file.ValueKind == JsonValueKind.String)
+                                {
+                                    files.Add(file.GetString() ?? "");
+                                }
+                            }
+                        }
+                        
+                        _ = Task.Run(async () =>
+                        {
+                            Func<object, Task> sendProgress = async (obj) =>
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(obj));
+                            };
+                            var result = await _fixGames.ExtractFilesAsync(downloadPath ?? "", files, password ?? "", sendProgress);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesReplace":
+                    {
+                        var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : string.Empty;
+                        var extractedPath = msg.payload.TryGetProperty("extractedPath", out var ep) ? ep.GetString() : string.Empty;
+                        
+                        _ = Task.Run(async () =>
+                        {
+                            Func<object, Task> sendProgress = async (obj) =>
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(obj));
+                            };
+                            var result = await _fixGames.ReplaceFilesAsync(gamePath ?? "", extractedPath ?? "", sendProgress);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesCancel":
+                    {
+                        // appid bisa dikirim sebagai number atau string
+                        int appid = 0;
+                        if (msg.payload.TryGetProperty("appid", out var a))
+                        {
+                            try
+                            {
+                                if (a.ValueKind == JsonValueKind.Number && a.TryGetInt32(out var num))
+                                {
+                                    appid = num;
+                                }
+                                else if (a.ValueKind == JsonValueKind.String)
+                                {
+                                    var s = a.GetString();
+                                    _ = int.TryParse(s, out appid);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"FixGamesCancel appid parse error: {ex.Message}");
+                                appid = 0;
+                            }
+                        }
+
+                        if (appid > 0)
+                        {
+                            _fixGames.Cancel(appid);
+                        }
+                        break;
+                    }
                     case "ActivateLicense":
                     {
                         var licenseKey = msg.payload.TryGetProperty("licenseKey", out var lk) ? (lk.GetString() ?? string.Empty) : string.Empty;
@@ -781,14 +1112,67 @@ namespace GameHubDesktop
             catch (Exception ex)
             {
                 _appLog.Append($"Exception: {ex.Message}");
-                SendToJs(new { type = "error", message = ex.Message });
+                // Don't send error message to JS - it interferes with other handlers
+                // Only log to app log for debugging
+                // SendToJs(new { type = "error", message = ex.Message });
             }
         }
 
         private void SendToJs(object obj)
         {
-            var json = JsonSerializer.Serialize(obj);
-            WebView.CoreWebView2.PostWebMessageAsJson(json);
+            string? json = null;
+            try
+            {
+                json = JsonSerializer.Serialize(obj);
+            }
+            catch (Exception ex)
+            {
+                _appLog.Append($"[SendToJs] Serialize error: {ex.Message}");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(json)) return;
+
+            // Pastikan PostWebMessageAsJson selalu dipanggil dari UI thread
+            try
+            {
+                if (WebView?.CoreWebView2 == null)
+                {
+                    _appLog.Append("[SendToJs] WebView.CoreWebView2 is null, cannot send message to JS.");
+                }
+                else if (System.Windows.Application.Current?.Dispatcher != null)
+                {
+                    if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+                    {
+                        WebView.CoreWebView2.PostWebMessageAsJson(json);
+                    }
+                    else
+                    {
+                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            try
+                            {
+                                WebView.CoreWebView2.PostWebMessageAsJson(json);
+                            }
+                            catch (Exception ex)
+                            {
+                                _appLog.Append($"[SendToJs] Dispatcher PostWebMessage error: {ex.Message}");
+                            }
+                        }, System.Windows.Threading.DispatcherPriority.Normal);
+                    }
+                }
+                else
+                {
+                    // Fallback: coba kirim langsung (tidak ideal, tapi lebih baik daripada diam)
+                    WebView.CoreWebView2.PostWebMessageAsJson(json);
+                }
+            }
+            catch (Exception ex)
+            {
+                _appLog.Append($"[SendToJs] PostWebMessage error: {ex.Message}");
+                return;
+            }
+
             try
             {
                 using var doc = JsonDocument.Parse(json);

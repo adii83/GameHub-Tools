@@ -1,4 +1,10 @@
-async function navigate(page) {
+// Store last navigate params
+window._lastNavigateParams = {};
+
+async function navigate(page, params = {}) {
+  // Store params for detail pages
+  window._lastNavigateParams = params;
+  
   const container = document.getElementById("app-content");
   const sidebarDashboard = document.getElementById("nav-dashboard");
   const sidebarGames = document.getElementById("nav-games");
@@ -20,8 +26,19 @@ async function navigate(page) {
       if (old.type) {
         s.type = old.type;
       }
-      // Inline script content
-      if (!old.src) {
+      // Handle both inline and external scripts for fix-games page
+      if (old.src) {
+        // For fix-games page, load external scripts
+        if (page === 'fix-games' && old.src.includes('fix-games.js')) {
+          // Check if script already loaded
+          const existing = document.querySelector(`script[src="${old.src}"]`);
+          if (!existing) {
+            s.src = old.src;
+            document.head.appendChild(s);
+          }
+        }
+      } else {
+        // Inline script content
         s.textContent = old.textContent || '';
         document.body.appendChild(s);
       }
@@ -56,21 +73,49 @@ async function navigate(page) {
       filterPanelContainer.innerHTML = filterPanelHtml;
     }
 
-    // Reset library filter jika aktif
-    if (typeof window.libraryFilterActive !== 'undefined') {
-      window.libraryFilterActive = false;
-    }
-    // Also reset local variable in filter.js
-    if (typeof libraryFilterActive !== 'undefined') {
-      libraryFilterActive = false;
+    // PERBAIKAN: Reset library filter dengan benar saat kembali ke games page
+    // Reset semua library filter state SEBELUM initGamesPage
+    window.libraryFilterActive = false;
+    // Reset local variable di filter.js scope (jika bisa diakses)
+    try {
+      if (typeof libraryFilterActive !== 'undefined') {
+        libraryFilterActive = false;
+      }
+      // Reset libraryAppIds juga (optional, tapi lebih aman)
+      if (typeof libraryAppIds !== 'undefined' && libraryAppIds instanceof Set) {
+        libraryAppIds.clear();
+      }
+    } catch (e) {
+      // Jika tidak bisa akses, tidak apa-apa, window.libraryFilterActive sudah di-reset
     }
 
     // Call initGamesPage untuk load games (loadGames hanya untuk settings page)
     if (typeof initGamesPage === "function") {
       await initGamesPage();
+      // PERBAIKAN: Apply filters lagi setelah init untuk memastikan library filter tidak aktif
+      // Defer untuk tidak block UI
+      setTimeout(() => {
+        try {
+          if (typeof applyFilters === 'function') {
+            applyFilters(true);
+          }
+        } catch (e) {
+          console.warn('Error applying filters after init:', e);
+        }
+      }, 150);
     } else if (typeof loadGames === "function") {
       // Fallback jika initGamesPage tidak ada
       await loadGames();
+      // Apply filters juga
+      setTimeout(() => {
+        try {
+          if (typeof applyFilters === 'function') {
+            applyFilters(true);
+          }
+        } catch (e) {
+          console.warn('Error applying filters after load:', e);
+        }
+      }, 150);
     }
   }
 
@@ -102,14 +147,77 @@ async function navigate(page) {
     }
   }
 
+  // Jika halaman adalah Fix Games Detail → load detail page
+  if (page === "fix-games-detail") {
+    // Get appid from navigate params
+    const navigateParams = window._lastNavigateParams || {};
+    const appid = navigateParams.appid;
+    
+    if (!appid) {
+      alert('AppID tidak ditemukan!');
+      navigate('fix-games');
+      return;
+    }
+    
+    // Load script jika belum ter-load
+    if (typeof initFixGameDetailPage !== 'function') {
+      const script = document.createElement('script');
+      script.src = '/js/fix-games-detail.js';
+      script.onload = () => {
+        setTimeout(() => {
+          if (typeof initFixGameDetailPage === 'function') {
+            initFixGameDetailPage(parseInt(appid));
+          }
+        }, 50);
+      };
+      document.head.appendChild(script);
+    } else {
+      setTimeout(() => {
+        if (typeof initFixGameDetailPage === 'function') {
+          initFixGameDetailPage(parseInt(appid));
+        }
+      }, 50);
+    }
+  }
+  
   // Jika halaman adalah Fix Games → load fix games data
   if (page === "fix-games") {
-    // Wait a bit untuk memastikan script fix-games.js sudah ter-load
-    setTimeout(() => {
-      if (typeof initFixGamesPage === 'function') {
-        initFixGamesPage();
+    // OPTIMASI: Load page-cache.js dulu jika belum ter-load
+    if (typeof window.FixGamesPageCache === 'undefined') {
+      const cacheScript = document.createElement('script');
+      cacheScript.src = '/js/page-cache.js';
+      cacheScript.onload = () => {
+        // Setelah cache script loaded, load fix-games.js
+        loadFixGamesScript();
+      };
+      document.head.appendChild(cacheScript);
+    } else {
+      loadFixGamesScript();
+    }
+    
+    function loadFixGamesScript() {
+      // Load script jika belum ter-load
+      if (typeof filterFixGamesByCategory !== 'function') {
+        const script = document.createElement('script');
+        script.src = '/js/fix-games.js';
+        script.onload = () => {
+          // Wait a bit untuk memastikan script sudah ter-execute
+          setTimeout(() => {
+            if (typeof initFixGamesPage === 'function') {
+              initFixGamesPage();
+            }
+          }, 50);
+        };
+        document.head.appendChild(script);
+      } else {
+        // Script sudah ter-load, langsung init
+        setTimeout(() => {
+          if (typeof initFixGamesPage === 'function') {
+            initFixGamesPage();
+          }
+        }, 50);
       }
-    }, 100);
+    }
   }
 
   // Jika halaman adalah Settings → load license info dan subscribe logs

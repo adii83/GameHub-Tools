@@ -14,9 +14,29 @@
     onMessage(handler) {
       if (!hasWebView) return;
       try {
-        window.chrome.webview.addEventListener('message', (evt) => {
+        const wrappedHandler = (evt) => {
           handler?.(evt?.data);
-        });
+        };
+        window.chrome.webview.addEventListener('message', wrappedHandler);
+        // Store handler for removal
+        if (!window._webviewMessageHandlers) {
+          window._webviewMessageHandlers = new WeakMap();
+        }
+        window._webviewMessageHandlers.set(handler, wrappedHandler);
+      } catch (e) {
+        // silent
+      }
+    },
+    offMessage(handler) {
+      if (!hasWebView) return;
+      try {
+        if (window._webviewMessageHandlers) {
+          const wrappedHandler = window._webviewMessageHandlers.get(handler);
+          if (wrappedHandler) {
+            window.chrome.webview.removeEventListener('message', wrappedHandler);
+            window._webviewMessageHandlers.delete(handler);
+          }
+        }
       } catch (e) {
         // silent
       }
@@ -68,6 +88,55 @@
         
         window.chrome.webview.addEventListener('message', handler);
         api.send('GetRawDataset', { forceRefresh });
+      });
+    },
+    // Get fix games data from C# (cached on disk)
+    async getFixGamesData(forceRefresh = false, progressCallback = null) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          reject(new Error('getFixGamesData timeout'));
+        }, 120000); // 2 minutes timeout
+        
+        let resolved = false;
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            
+            if (data?.type === 'FixGamesDataProgress') {
+              if (progressCallback && typeof progressCallback === 'function') {
+                try {
+                  progressCallback(data.percent || 0, data.message || null);
+                } catch (e) {}
+              }
+            } else if (data?.type === 'FixGamesData') {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                try {
+                  window.chrome.webview.removeEventListener('message', handler);
+                } catch (e) {}
+                resolve(data.data);
+              }
+            }
+          } catch (e) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try {
+                window.chrome.webview.removeEventListener('message', handler);
+              } catch (err) {}
+              reject(e);
+            }
+          }
+        };
+        
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetFixGamesData', { forceRefresh });
       });
     },
     // Get metadata for specific appid from C#
