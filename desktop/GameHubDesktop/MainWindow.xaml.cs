@@ -73,7 +73,7 @@ namespace GameHubDesktop
 
                 WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     "app.local", appRoot, CoreWebView2HostResourceAccessKind.Allow);
-                
+
                 // Setup WebMessageReceived handler SEBELUM navigasi
                 WebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
                 
@@ -957,6 +957,7 @@ namespace GameHubDesktop
                         var downloadPath = msg.payload.TryGetProperty("downloadPath", out var dp) ? dp.GetString() : string.Empty;
                         var filesJson = msg.payload.TryGetProperty("files", out var f) ? f : default;
                         var password = msg.payload.TryGetProperty("password", out var p) ? p.GetString() : string.Empty;
+                        var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : null;
                         
                         var files = new List<string>();
                         if (filesJson.ValueKind == JsonValueKind.Array)
@@ -976,7 +977,7 @@ namespace GameHubDesktop
                             {
                                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(obj));
                             };
-                            var result = await _fixGames.ExtractFilesAsync(downloadPath ?? "", files, password ?? "", sendProgress);
+                            var result = await _fixGames.ExtractFilesAsync(downloadPath ?? "", files, password ?? "", sendProgress, gamePath);
                             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
                         });
                         break;
@@ -993,6 +994,18 @@ namespace GameHubDesktop
                                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(obj));
                             };
                             var result = await _fixGames.ReplaceFilesAsync(gamePath ?? "", extractedPath ?? "", sendProgress);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesCleanup":
+                    {
+                        var downloadPath = msg.payload.TryGetProperty("downloadPath", out var dp) ? dp.GetString() : string.Empty;
+                        var extractedPath = msg.payload.TryGetProperty("extractedPath", out var ep) ? ep.GetString() : string.Empty;
+                        
+                        _ = Task.Run(async () =>
+                        {
+                            var result = await _fixGames.CleanupTempFilesAsync(downloadPath ?? "", extractedPath ?? "");
                             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
                         });
                         break;
@@ -1144,7 +1157,7 @@ namespace GameHubDesktop
                 {
                     if (System.Windows.Application.Current.Dispatcher.CheckAccess())
                     {
-                        WebView.CoreWebView2.PostWebMessageAsJson(json);
+            WebView.CoreWebView2.PostWebMessageAsJson(json);
                     }
                     else
                     {
