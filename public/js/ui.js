@@ -262,24 +262,74 @@ async function openDetail(appid) {
       const overrideMap = await loadLocalSteamData();
       if (overrideMap && overrideMap.has(Number(appid))) {
         const overrideData = overrideMap.get(Number(appid));
+        
+        // Debug: Log override data untuk troubleshooting
+        if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+          try {
+            const overrideKeys = Object.keys(overrideData || {});
+            const gameDataKeys = Object.keys(gameData || {});
+            window.desktopBridge.send('AppLog', { 
+              message: `[Detail] Merge override for appid ${appid} - override keys: [${overrideKeys.join(', ')}], gameData keys: [${gameDataKeys.slice(0, 5).join(', ')}...]` 
+            });
+          } catch (e) {}
+        }
+        
         // Apply override menggunakan fungsi yang sama dengan mergeWithLocalDataset
         if (typeof applyLocalOverridesToItem === 'function') {
-          return applyLocalOverridesToItem(gameData, overrideData);
+          const merged = applyLocalOverridesToItem(gameData, overrideData);
+          
+          // Debug: Verifikasi merge result
+          if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+            try {
+              const hasTitle = !!merged.title;
+              const hasHeader = !!merged.header;
+              const hasDescription = !!merged.short_description;
+              const mergedKeys = Object.keys(merged || {});
+              if (!hasTitle || !hasHeader || !hasDescription) {
+                window.desktopBridge.send('AppLog', { 
+                  message: `[Detail] ERROR: Fields missing after applyLocalOverridesToItem - title:${hasTitle}, header:${hasHeader}, desc:${hasDescription}, merged keys: [${mergedKeys.slice(0, 10).join(', ')}...]` 
+                });
+              } else {
+                window.desktopBridge.send('AppLog', { 
+                  message: `[Detail] Merge successful - all fields present, merged keys: [${mergedKeys.slice(0, 10).join(', ')}...]` 
+                });
+              }
+            } catch (e) {}
+          }
+          
+          return merged;
         } else {
           // Fallback: manual merge
+          // PERBAIKAN: Hanya override field yang benar-benar ada di override (tidak undefined)
           const merged = Object.assign({}, gameData);
           const keys = ['title','header','genre','genre_display','short_description',
             'developers','publishers','release_date','price_display','price_normalized','price_initial','protection','last_update'];
           for (const k of keys) {
-            if (Object.prototype.hasOwnProperty.call(overrideData, k)) {
-              merged[k] = overrideData[k];
+            // PERBAIKAN: Cek apakah field ada DAN nilainya tidak undefined
+            if (Object.prototype.hasOwnProperty.call(overrideData, k) && overrideData[k] !== undefined) {
+              const overrideValue = overrideData[k];
+              // Untuk protection, null adalah nilai valid
+              if (k === 'protection') {
+                merged[k] = overrideValue;
+              } else {
+                // Untuk field lain, langsung assign (sudah cek undefined di atas)
+                merged[k] = overrideValue;
+              }
             }
+            // Jika field tidak ada di override ATAU nilainya undefined, skip (keep dari gameData)
           }
           return merged;
         }
       }
     } catch (e) {
       // Jika error, return data asli
+      if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+        try {
+          window.desktopBridge.send('AppLog', { 
+            message: `[Detail] Error in mergeWithLatestOverride: ${e.message || 'Unknown'}` 
+          });
+        } catch (e2) {}
+      }
     }
     return gameData;
   }
@@ -289,7 +339,23 @@ async function openDetail(appid) {
   if (g) {
     logDetailSource('originalData');
     // IMPORTANT: Merge dengan override terbaru sebelum digunakan
-    g = await mergeWithLatestOverride(g);
+    // PERBAIKAN: Clone dulu untuk memastikan tidak mengubah originalData
+    const gameClone = Object.assign({}, g);
+    g = await mergeWithLatestOverride(gameClone);
+    
+    // Debug: Log jika ada field yang hilang setelah merge
+    if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+      try {
+        const hasTitle = !!g.title;
+        const hasHeader = !!g.header;
+        const hasDescription = !!g.short_description;
+        if (!hasTitle || !hasHeader || !hasDescription) {
+          window.desktopBridge.send('AppLog', { 
+            message: `[Detail] Warning: Missing fields after merge - title:${hasTitle}, header:${hasHeader}, desc:${hasDescription}, appid:${appid}` 
+          });
+        }
+      } catch (e) {}
+    }
   }
   // Jika tidak ada, coba fetch dari local_data_steam.json (built-in)
   if (!g) {
@@ -305,14 +371,59 @@ async function openDetail(appid) {
   }
   
   // Jika tetap tidak ada, cek override data via bridge (untuk game baru dari override)
+  // PERBAIKAN: Jika game hanya ada di override dengan partial data, coba fetch dari raw data dulu
   if (!g) {
     try {
       // Cek user override dulu (prioritas tertinggi)
       if (window.desktopBridge && typeof window.desktopBridge.getUserOverride === 'function') {
         const userOverride = await window.desktopBridge.getUserOverride().catch(() => null);
         if (userOverride && userOverride[appid]) {
-          g = Object.assign({ appid: Number(appid) }, userOverride[appid]);
-          logDetailSource('user_override');
+          // Jika override hanya punya partial data, coba fetch dari raw data dulu
+          let baseData = null;
+          try {
+            if (typeof getFullMetadataForAppid === 'function') {
+              baseData = await getFullMetadataForAppid(appid).catch(() => null);
+            }
+          } catch (e) {}
+          
+          // Merge: raw data sebagai base, override sebagai update
+          // PERBAIKAN: Gunakan applyLocalOverridesToItem untuk merge yang benar (hanya override field yang ada)
+          if (baseData) {
+            if (typeof applyLocalOverridesToItem === 'function') {
+              g = applyLocalOverridesToItem(baseData, userOverride[appid]);
+            } else {
+              // Fallback: Object.assign (tapi ini bisa menghapus field yang tidak ada di override)
+              g = Object.assign({ appid: Number(appid) }, baseData, userOverride[appid]);
+            }
+            logDetailSource('user_override + raw_data');
+          } else {
+            // Jika tidak ada raw data, coba fetch dari raw data via bridge
+            try {
+              if (typeof getFullMetadataForAppid === 'function') {
+                const fallbackBaseData = await getFullMetadataForAppid(appid).catch(() => null);
+                if (fallbackBaseData) {
+                  if (typeof applyLocalOverridesToItem === 'function') {
+                    g = applyLocalOverridesToItem(fallbackBaseData, userOverride[appid]);
+                  } else {
+                    g = Object.assign({ appid: Number(appid) }, fallbackBaseData, userOverride[appid]);
+                  }
+                  logDetailSource('user_override + raw_data (fallback)');
+                } else {
+                  // Jika tidak ada raw data sama sekali, gunakan override saja (partial data)
+                  g = Object.assign({ appid: Number(appid) }, userOverride[appid]);
+                  logDetailSource('user_override (partial only)');
+                }
+              } else {
+                // Jika tidak ada raw data sama sekali, gunakan override saja (partial data)
+                g = Object.assign({ appid: Number(appid) }, userOverride[appid]);
+                logDetailSource('user_override (partial only)');
+              }
+            } catch (e) {
+              // Jika error, gunakan override saja (partial data)
+              g = Object.assign({ appid: Number(appid) }, userOverride[appid]);
+              logDetailSource('user_override (partial only, error)');
+            }
+          }
         }
       }
     } catch (e) {}
@@ -324,8 +435,52 @@ async function openDetail(appid) {
       if (window.desktopBridge && typeof window.desktopBridge.getGlobalOverride === 'function') {
         const globalOverride = await window.desktopBridge.getGlobalOverride(false).catch(() => null);
         if (globalOverride && globalOverride[appid]) {
-          g = Object.assign({ appid: Number(appid) }, globalOverride[appid]);
-          logDetailSource('global_override');
+          // Jika override hanya punya partial data, coba fetch dari raw data dulu
+          let baseData = null;
+          try {
+            if (typeof getFullMetadataForAppid === 'function') {
+              baseData = await getFullMetadataForAppid(appid).catch(() => null);
+            }
+          } catch (e) {}
+          
+          // Merge: raw data sebagai base, override sebagai update
+          // PERBAIKAN: Gunakan applyLocalOverridesToItem untuk merge yang benar (hanya override field yang ada)
+          if (baseData) {
+            if (typeof applyLocalOverridesToItem === 'function') {
+              g = applyLocalOverridesToItem(baseData, globalOverride[appid]);
+            } else {
+              // Fallback: Object.assign (tapi ini bisa menghapus field yang tidak ada di override)
+              g = Object.assign({ appid: Number(appid) }, baseData, globalOverride[appid]);
+            }
+            logDetailSource('global_override + raw_data');
+          } else {
+            // Jika tidak ada raw data, coba fetch dari raw data via bridge
+            try {
+              if (typeof getFullMetadataForAppid === 'function') {
+                const fallbackBaseData = await getFullMetadataForAppid(appid).catch(() => null);
+                if (fallbackBaseData) {
+                  if (typeof applyLocalOverridesToItem === 'function') {
+                    g = applyLocalOverridesToItem(fallbackBaseData, globalOverride[appid]);
+                  } else {
+                    g = Object.assign({ appid: Number(appid) }, fallbackBaseData, globalOverride[appid]);
+                  }
+                  logDetailSource('global_override + raw_data (fallback)');
+                } else {
+                  // Jika tidak ada raw data sama sekali, gunakan override saja (partial data)
+                  g = Object.assign({ appid: Number(appid) }, globalOverride[appid]);
+                  logDetailSource('global_override (partial only)');
+                }
+              } else {
+                // Jika tidak ada raw data sama sekali, gunakan override saja (partial data)
+                g = Object.assign({ appid: Number(appid) }, globalOverride[appid]);
+                logDetailSource('global_override (partial only)');
+              }
+            } catch (e) {
+              // Jika error, gunakan override saja (partial data)
+              g = Object.assign({ appid: Number(appid) }, globalOverride[appid]);
+              logDetailSource('global_override (partial only, error)');
+            }
+          }
         }
       }
     } catch (e) {}
