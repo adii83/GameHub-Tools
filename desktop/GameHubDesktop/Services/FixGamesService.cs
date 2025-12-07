@@ -18,6 +18,8 @@ using SharpCompress.Archives.Rar;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
 using SharpCompress.Readers;
+using System.Drawing;
+using System.Drawing.Imaging;
 
 namespace GameHubDesktop.Services
 {
@@ -56,11 +58,11 @@ namespace GameHubDesktop.Services
         public async Task<object> CheckAntivirusAsync()
         {
             LogInfo("Memeriksa antivirus yang terinstall...");
-            
+
             try
             {
                 var antivirusList = new List<string>();
-                
+
                 // Check Windows Security Center via WMI
                 try
                 {
@@ -68,14 +70,14 @@ namespace GameHubDesktop.Services
                         "SELECT * FROM AntiVirusProduct",
                         "root\\SecurityCenter2"
                     );
-                    
+
                     foreach (ManagementObject obj in searcher.Get())
                     {
                         try
                         {
                             // Try to get displayName property safely
                             string? productName = null;
-                            
+
                             // Try to get product name using PropertyData collection (safer)
                             try
                             {
@@ -86,21 +88,27 @@ namespace GameHubDesktop.Services
                                     {
                                         // Only check properties that might contain name
                                         var propName = prop.Name.ToLowerInvariant();
-                                        if (propName.Contains("name") || propName.Contains("display") || propName.Contains("product"))
+                                        if (propName.Contains("name") ||
+                                            propName.Contains("display") ||
+                                            propName.Contains("product"))
                                         {
                                             var propValue = prop.Value;
                                             if (propValue != null)
                                             {
                                                 // Only use string values, skip all numeric types
-                                                if (propValue is string str && !string.IsNullOrWhiteSpace(str))
+                                                if (propValue is string str &&
+                                                    !string.IsNullOrWhiteSpace(str))
                                                 {
                                                     productName = str;
                                                     break; // Found valid name
                                                 }
                                                 // Explicitly skip numeric types
-                                                else if (propValue is int || propValue is long || propValue is uint || propValue is ulong ||
-                                                         propValue is short || propValue is ushort || propValue is byte || propValue is sbyte ||
-                                                         propValue is float || propValue is double || propValue is decimal)
+                                                else if (propValue is int || propValue is long ||
+                                                         propValue is uint || propValue is ulong ||
+                                                         propValue is short || propValue is ushort ||
+                                                         propValue is byte || propValue is sbyte ||
+                                                         propValue is float || propValue is double ||
+                                                         propValue is decimal)
                                                 {
                                                     // Skip numeric values completely
                                                     continue;
@@ -143,7 +151,7 @@ namespace GameHubDesktop.Services
                                     // All methods failed, skip this object
                                 }
                             }
-                            
+
                             if (!string.IsNullOrWhiteSpace(productName))
                             {
                                 antivirusList.Add(productName);
@@ -167,8 +175,8 @@ namespace GameHubDesktop.Services
                 // Check Registry for common antivirus
                 var registryKeys = new[]
                 {
-                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-                    @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+                    @"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+                    @"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
                 };
 
                 var commonAntivirus = new[]
@@ -189,7 +197,7 @@ namespace GameHubDesktop.Services
                             using var subKey = key.OpenSubKey(subKeyName);
                             if (subKey == null) continue;
 
-                            var displayName = subKey.GetValue("DisplayName")?.ToString() ?? "";
+                            var displayName = subKey.GetValue("DisplayName")?.ToString() ?? string.Empty;
                             foreach (var av in commonAntivirus)
                             {
                                 if (displayName.Contains(av, StringComparison.OrdinalIgnoreCase))
@@ -1119,560 +1127,133 @@ namespace GameHubDesktop.Services
         public async Task<object> ExtractFilesAsync(string downloadPath, List<string> files, string password, Func<object, Task> sendProgress, string? gamePath = null)
         {
             LogInfo($"Mengekstrak {files.Count} files");
-            
+
+            // Pastikan setiap file hasil unduhan valid sebelum lanjut
+            foreach (var file in files)
+            {
+                var filePath = Path.Combine(downloadPath, file);
+                if (!File.Exists(filePath))
+                {
+                    throw new Exception($"File tidak ditemukan sebelum ekstraksi: {file}");
+                }
+                var info = new FileInfo(filePath);
+                if (info.Length == 0)
+                {
+                    throw new Exception($"File kosong sebelum ekstraksi: {file}");
+                }
+                LogInfo($"File validated sebelum ekstraksi: {file} ({info.Length} bytes)");
+            }
+
             try
             {
                 string extractedFolder = string.Empty;
-                bool useTempFolder = true;
-                
-                // Try to create extracted folder in temporary directory first
+
+                // Coba pakai temp folder default terlebih dahulu
                 try
                 {
                     if (string.IsNullOrWhiteSpace(_tempDownloadPath))
                     {
                         throw new Exception("Temporary download path tidak tersedia");
                     }
-                    
+
                     extractedFolder = Path.Combine(_tempDownloadPath, "extracted");
-                    
-                    // Try to create directory to test if it's accessible
                     if (Directory.Exists(extractedFolder))
                     {
-                        // Clean up previous extraction
                         try { Directory.Delete(extractedFolder, true); } catch { }
                     }
-                    
-                    // Try to create directory - if this fails, we'll use fallback
+
                     Directory.CreateDirectory(extractedFolder);
-                    
-                    // Test write access by creating a test file
-                    var testFile = Path.Combine(extractedFolder, ".test_write");
-                    try
-                    {
-                        File.WriteAllText(testFile, "test");
-                        File.Delete(testFile);
-                        LogInfo($"Menggunakan temporary folder: {extractedFolder}");
-                    }
-                    catch
-                    {
-                        // Cannot write to temp folder, use fallback
-                        useTempFolder = false;
-                        LogInfo($"Tidak dapat menulis ke temporary folder, menggunakan fallback");
-                    }
                 }
                 catch (Exception ex)
                 {
-                    // Temp folder creation failed, use fallback
-                    useTempFolder = false;
-                    LogInfo($"Gagal membuat temporary folder: {ex.Message}, menggunakan fallback");
-                }
-                
-                // Fallback: Extract directly to game folder if temp folder is not available
-                if (!useTempFolder)
-                {
-                    if (!string.IsNullOrWhiteSpace(gamePath) && Directory.Exists(gamePath))
+                    LogInfo($"Gagal menggunakan temp folder default: {ex.Message}");
+
+                    extractedFolder = Path.Combine(downloadPath, "extracted");
+                    if (Directory.Exists(extractedFolder))
                     {
-                        // Extract to game folder with subfolder
-                        extractedFolder = Path.Combine(gamePath, "_extracted_temp");
-                        LogInfo($"Menggunakan fallback: extract langsung ke game folder: {extractedFolder}");
-                        
-                        // Clean up previous extraction if exists
-                        if (Directory.Exists(extractedFolder))
+                        try { Directory.Delete(extractedFolder, true); } catch { }
+                    }
+                    Directory.CreateDirectory(extractedFolder);
+                    LogInfo("Fallback extracted folder ke downloadPath");
+                }
+
+                string GetArchiveKey(string fileName)
+                {
+                    if (fileName.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var match = Regex.Match(fileName, @"^(.*?)(?:\.part\d+)?\.rar$", RegexOptions.IgnoreCase);
+                        if (match.Success)
                         {
-                            try { Directory.Delete(extractedFolder, true); } catch { }
-                        }
-                        
-                        try
-                        {
-                            Directory.CreateDirectory(extractedFolder);
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new Exception($"Tidak dapat membuat folder ekstraksi di game folder: {ex.Message}");
+                            return match.Groups[1].Value;
                         }
                     }
-                    else
-                    {
-                        // Last resort: Use AppData folder
-                        var appDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GameHub", "extracted");
-                        extractedFolder = appDataPath;
-                        LogInfo($"Menggunakan fallback terakhir: AppData folder: {extractedFolder}");
-                        
-                        // Clean up previous extraction if exists
-                        if (Directory.Exists(extractedFolder))
-                        {
-                            try { Directory.Delete(extractedFolder, true); } catch { }
-                        }
-                        
-                        try
-                        {
-                            Directory.CreateDirectory(extractedFolder);
-                        }
-                        catch (Exception ex)
-                        {
-                            throw new Exception($"Tidak dapat membuat folder ekstraksi di AppData: {ex.Message}");
-                        }
-                    }
+                    return fileName;
                 }
-                
-                // Validate extractedFolder is set (should always be set by now)
-                if (string.IsNullOrWhiteSpace(extractedFolder))
-                {
-                    throw new Exception("Tidak dapat menentukan folder ekstraksi");
-                }
-                
-                int totalFiles = files.Count;
-                int processedFiles = 0;
-                
-                // Group files by archive (for multi-part RAR)
-                var processedArchives = new HashSet<string>();
-                
+
+                var archiveKeySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var file in files)
                 {
-                    var archivePath = Path.Combine(downloadPath, file);
-                    if (!File.Exists(archivePath))
+                    var key = GetArchiveKey(file);
+                    archiveKeySet.Add(key);
+                }
+                var totalArchives = archiveKeySet.Count;
+                var processedArchives = 0;
+                var processedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var file in files)
+                {
+                    var archiveKey = GetArchiveKey(file);
+                    if (!processedKeys.Add(archiveKey))
                     {
-                        LogInfo($"File tidak ditemukan: {archivePath}");
+                        LogInfo($"Skip {file} karena sudah diekstrak sebagai bagian dari {archiveKey}");
                         continue;
                     }
-                    
-                    // Determine archive type by extension
-                    var ext = Path.GetExtension(file).ToLowerInvariant();
-                    var fileName = Path.GetFileNameWithoutExtension(file);
-                    bool isRar = ext == ".rar" || ext.EndsWith(".part1.rar") || ext == ".r00" || ext.StartsWith(".part") || ext.StartsWith(".r");
-                    bool isZip = ext == ".zip";
-                    
+
+                    var archivePath = Path.Combine(downloadPath, file);
+                    var extension = Path.GetExtension(file)?.ToLowerInvariant();
+                    var isRar = string.Equals(extension, ".rar", StringComparison.OrdinalIgnoreCase);
+                    var isZip = string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase);
+
                     if (!isRar && !isZip)
                     {
-                        LogInfo($"Format tidak didukung, skip file");
+                        LogInfo($"Lewati {file} - bukan archive RAR/ZIP");
                         continue;
                     }
-                    
-                    // For multi-part RAR, detect base name and skip if already processed
-                    if (isRar)
-                    {
-                        // Detect multi-part RAR pattern: filename.part1.rar, filename.part2.rar, etc.
-                        // Or: filename.rar, filename.r00, filename.r01, etc.
-                        string baseName = fileName;
-                        if (ext.Contains(".part"))
-                        {
-                            // filename.part1.rar -> filename
-                            var partIndex = fileName.LastIndexOf(".part", StringComparison.OrdinalIgnoreCase);
-                            if (partIndex > 0)
-                            {
-                                baseName = fileName.Substring(0, partIndex);
-                            }
-                        }
-                        else if (ext.StartsWith(".r") && ext.Length > 1)
-                        {
-                            // filename.r00 -> filename
-                            baseName = fileName;
-                        }
-                        
-                        // Skip if this archive base was already processed
-                        if (processedArchives.Contains(baseName))
-                        {
-                            LogInfo($"Skip {file} (sudah diproses sebagai bagian dari multi-part archive)");
-                            continue;
-                        }
-                        
-                        processedArchives.Add(baseName);
-                    }
-                    
-                    // Declare variables outside try block so they're accessible in catch
-                    bool isMultiPart = false;
-                    List<string> partFiles = new List<string>();
-                    
-                    // Extract using SharpCompress
+
                     try
                     {
-                        IArchive? archive = null;
-                        
                         if (isRar)
                         {
-                            // For multi-part RAR, collect all part files
-                            // Detect if this is a multi-part RAR
-                            string? baseNameForParts = null;
-                            
-                            if (ext.Contains(".part"))
+                            var partFiles = files
+                                .Where(f => f.EndsWith(".rar", StringComparison.OrdinalIgnoreCase))
+                                .Where(f => Regex.IsMatch(f, $"^{Regex.Escape(archiveKey)}(?:\\.part\\d+)?\\.rar$", RegexOptions.IgnoreCase))
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList();
+
+                            if (partFiles.Count == 0)
                             {
-                                // Pattern: filename.part1.rar, filename.part2.rar
-                                var partIndex = fileName.LastIndexOf(".part", StringComparison.OrdinalIgnoreCase);
-                                if (partIndex > 0)
-                                {
-                                    baseNameForParts = fileName.Substring(0, partIndex);
-                                    isMultiPart = true;
-                                }
+                                partFiles.Add(file);
                             }
-                            else if (ext.StartsWith(".r") && ext.Length > 1 && char.IsDigit(ext[1]))
+
+                            ValidatePartFiles(partFiles, downloadPath);
+                            var orderedParts = partFiles.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+                            var firstPart = DetermineFirstPartFile(orderedParts);
+                            var firstPartPath = Path.Combine(downloadPath, firstPart);
+                            var absolutePartPaths = orderedParts
+                                .Select(part => Path.Combine(downloadPath, part))
+                                .ToList();
+
+                            var extractResult = await ExtractWithExternalToolAsync(firstPartPath, extractedFolder, password, absolutePartPaths);
+                            if (!extractResult.success)
                             {
-                                // Pattern: filename.r00, filename.r01
-                                baseNameForParts = fileName;
-                                isMultiPart = true;
+                                var errorMessage = extractResult.error ?? "Tidak ada pesan error";
+                                throw new Exception($"WinRAR/7-Zip gagal mengekstrak {file}: {errorMessage}");
                             }
-                            else if (ext == ".rar")
-                            {
-                                // Check if there are other parts (r00, r01, etc.)
-                                var dir = Path.GetDirectoryName(archivePath);
-                                if (dir != null)
-                                {
-                                    var r00File = Path.Combine(dir, fileName + ".r00");
-                                    if (File.Exists(r00File))
-                                    {
-                                        baseNameForParts = fileName;
-                                        isMultiPart = true;
-                                    }
-                                }
-                            }
-                            
-                            if (isMultiPart && baseNameForParts != null)
-                            {
-                                // Collect all part files
-                                var dir = Path.GetDirectoryName(archivePath);
-                                if (dir != null)
-                                {
-                                    // Look for all part files: .part1.rar, .part2.rar, etc. or .r00, .r01, etc.
-                                    var allFiles = Directory.GetFiles(dir);
-                                    foreach (var f in allFiles)
-                                    {
-                                        var fName = Path.GetFileNameWithoutExtension(f);
-                                        var fExt = Path.GetExtension(f).ToLowerInvariant();
-                                        
-                                        // Check if this file is part of the multi-part archive
-                                        bool isPart = false;
-                                        if (fExt.Contains(".part") && fName.StartsWith(baseNameForParts, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            isPart = true;
-                                        }
-                                        else if (fExt.StartsWith(".r") && fName.Equals(baseNameForParts, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            isPart = true;
-                                        }
-                                        else if (fExt == ".rar" && fName.Equals(baseNameForParts, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            isPart = true;
-                                        }
-                                        
-                                        if (isPart)
-                                        {
-                                            partFiles.Add(f);
-                                        }
-                                    }
-                                    
-                                    // Sort part files
-                                    partFiles.Sort();
-                                    LogInfo($"Multi-part RAR terdeteksi: {partFiles.Count} part files");
-                                }
-                            }
-                            
-                            // Validate RAR file before opening
-                            // Check file size (RAR files should be at least a few bytes)
-                            var fileInfo = new FileInfo(archivePath);
-                            if (fileInfo.Length < 20)
-                            {
-                                throw new Exception($"File RAR terlalu kecil atau corrupt: {file} (size: {fileInfo.Length} bytes)");
-                            }
-                            
-                            // Check RAR signature (informational only - don't fail if invalid)
-                            // Some valid RAR files might not have standard signature
-                            bool hasValidSignature = false;
-                            try
-                            {
-                                using var sigCheck = File.OpenRead(archivePath);
-                                byte[] header = new byte[7]; // Read more bytes for better detection
-                                int read = sigCheck.Read(header, 0, 7);
-                                if (read >= 4)
-                                {
-                                    // Check for RAR signature: "Rar!" (52 61 72 21) or "RE~" (52 45 7E)
-                                    // Also check for RAR5 signature: "Rar!\x1A\x07\x00" or "Rar!\x1A\x07\x01"
-                                    if ((header[0] == 0x52 && header[1] == 0x61 && header[2] == 0x72 && header[3] == 0x21) ||
-                                        (header[0] == 0x52 && header[1] == 0x45 && header[2] == 0x7E))
-                                    {
-                                        hasValidSignature = true;
-                                    }
-                                }
-                            }
-                            catch (Exception sigEx)
-                            {
-                                LogInfo($"Error checking RAR signature: {sigEx.Message}");
-                            }
-                            
-                            // Don't fail if signature is invalid - let SharpCompress decide
-                            // Some valid RAR files might not have standard signature
-                            if (!hasValidSignature)
-                            {
-                                LogInfo($"Warning: File tidak memiliki RAR signature standar, tapi akan tetap dicoba (file mungkin valid): {file}");
-                            }
-                            else
-                            {
-                                LogInfo($"RAR signature valid untuk: {file}");
-                            }
-                            
-                            // Open RAR archive
-                            try
-                            {
-                                var options = new ReaderOptions();
-                                if (!string.IsNullOrWhiteSpace(password))
-                                {
-                                    options.Password = password;
-                                }
-                                
-                                if (isMultiPart && partFiles.Count > 1)
-                                {
-                                    // For multi-part RAR, SharpCompress needs the first part
-                                    // It will automatically look for other parts in the same directory
-                                    // Find the first part (part1.rar, or .rar if using .r00 format)
-                                    string? firstPartPath = null;
-                                    
-                                    // Try to find part1.rar first
-                                    foreach (var partFile in partFiles)
-                                    {
-                                        var partExt = Path.GetExtension(partFile).ToLowerInvariant();
-                                        var partName = Path.GetFileName(partFile).ToLowerInvariant();
-                                        
-                                        if (partExt.Contains(".part1.rar") || 
-                                            (partExt == ".rar" && !partName.Contains(".part")))
-                                        {
-                                            firstPartPath = partFile;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    // If no part1.rar found, use .rar file (for .r00 format)
-                                    if (firstPartPath == null)
-                                    {
-                                        foreach (var partFile in partFiles)
-                                        {
-                                            var partExt = Path.GetExtension(partFile).ToLowerInvariant();
-                                            if (partExt == ".rar")
-                                            {
-                                                firstPartPath = partFile;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Fallback: use first file in sorted list
-                                    if (firstPartPath == null && partFiles.Count > 0)
-                                    {
-                                        firstPartPath = partFiles[0];
-                                    }
-                                    
-                                    if (firstPartPath == null)
-                                    {
-                                        throw new Exception("Tidak dapat menemukan part pertama dari multi-part RAR");
-                                    }
-                                    
-                                    // Validate first part file
-                                    var firstPartInfo = new FileInfo(firstPartPath);
-                                    if (firstPartInfo.Length < 20)
-                                    {
-                                        throw new Exception($"Part pertama terlalu kecil atau corrupt: {Path.GetFileName(firstPartPath)} (size: {firstPartInfo.Length} bytes)");
-                                    }
-                                    
-                                    LogInfo($"Membuka multi-part RAR ({partFiles.Count} parts)");
-                                    
-                                    // Verify all part files exist and have reasonable size
-                                    foreach (var partFile in partFiles)
-                                    {
-                                        if (!File.Exists(partFile))
-                                        {
-                                            throw new Exception($"Part file tidak ditemukan: {Path.GetFileName(partFile)}");
-                                        }
-                                        var partInfo = new FileInfo(partFile);
-                                        if (partInfo.Length == 0)
-                                        {
-                                            throw new Exception($"Part file kosong atau corrupt: {Path.GetFileName(partFile)}");
-                                        }
-                                        // Part file validated
-                                    }
-                                    
-                                    // Open first part - SharpCompress should auto-detect other parts
-                                    // Open first part - SharpCompress should auto-detect other parts
-                                    // Try multiple approaches for better compatibility
-                                    try
-                                    {
-                                        using var stream = File.OpenRead(firstPartPath);
-                                        archive = RarArchive.Open(stream, options);
-                                    }
-                                    catch (Exception rarEx)
-                                    {
-                                        // If RarArchive.Open fails, try WinRAR/7-Zip command line as fallback
-                                        LogInfo($"SharpCompress gagal, mencoba WinRAR/7-Zip fallback");
-                                        
-                                        try
-                                        {
-                                            var extractResult = await ExtractWithExternalToolAsync(firstPartPath, extractedFolder, password, partFiles);
-                                            if (extractResult.success)
-                                            {
-                                                LogInfo($"Ekstraksi berhasil dengan WinRAR/7-Zip");
-                                                // Skip SharpCompress extraction, files already extracted
-                                                processedFiles++;
-                                                var extractProgressPct = (int)((processedFiles * 100.0) / totalFiles);
-                                                if (sendProgress != null)
-                                                {
-                                                    await sendProgress(new
-                                                    {
-                                                        type = "FixGamesExtractProgress",
-                                                        percent = extractProgressPct,
-                                                        currentFile = processedFiles,
-                                                        totalFiles = totalFiles,
-                                                        currentArchive = file
-                                                    });
-                                                }
-                                                continue; // Skip to next file
-                                            }
-                                            else
-                                            {
-                                                throw new Exception($"WinRAR/7-Zip juga gagal: {extractResult.error}");
-                                            }
-                                        }
-                                        catch (Exception toolEx)
-                                        {
-                                            LogInfo($"WinRAR/7-Zip fallback gagal: {toolEx.Message}");
-                                            throw new Exception($"Gagal membuka multi-part RAR. SharpCompress: {rarEx.Message}. WinRAR/7-Zip: {toolEx.Message}");
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    // Single RAR file
-                                    try
-                                    {
-                                        // Don't use 'using' here - keep stream open for archive
-                                        var stream = File.OpenRead(archivePath);
-                                        archive = RarArchive.Open(stream, options);
-                                    }
-                                    catch (Exception rarEx)
-                                    {
-                                        // If RarArchive.Open fails, try WinRAR/7-Zip command line as fallback
-                                        LogInfo($"SharpCompress gagal, mencoba WinRAR/7-Zip fallback");
-                                        
-                                        try
-                                        {
-                                            var extractResult = await ExtractWithExternalToolAsync(archivePath, extractedFolder, password, new List<string> { archivePath });
-                                            if (extractResult.success)
-                                            {
-                                                LogInfo($"Ekstraksi berhasil dengan WinRAR/7-Zip");
-                                                // Skip SharpCompress extraction, files already extracted
-                                                processedFiles++;
-                                                var extractProgressPct = (int)((processedFiles * 100.0) / totalFiles);
-                                                if (sendProgress != null)
-                                                {
-                                                    await sendProgress(new
-                                                    {
-                                                        type = "FixGamesExtractProgress",
-                                                        percent = extractProgressPct,
-                                                        currentFile = processedFiles,
-                                                        totalFiles = totalFiles,
-                                                        currentArchive = file
-                                                    });
-                                                }
-                                                continue; // Skip to next file
-                                            }
-                                            else
-                                            {
-                                                throw new Exception($"WinRAR/7-Zip juga gagal: {extractResult.error}");
-                                            }
-                                        }
-                                        catch (Exception toolEx)
-                                        {
-                                            LogInfo($"WinRAR/7-Zip fallback gagal: {toolEx.Message}");
-                                            throw new Exception($"Gagal membuka RAR. SharpCompress: {rarEx.Message}. WinRAR/7-Zip: {toolEx.Message}");
-                                        }
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                // If error contains "signature" or "rar", try WinRAR/7-Zip fallback
-                                bool shouldTryFallback = ex.Message.Contains("signature", StringComparison.OrdinalIgnoreCase) || 
-                                                         ex.Message.Contains("rar", StringComparison.OrdinalIgnoreCase);
-                                
-                                if (shouldTryFallback)
-                                {
-                                    LogInfo($"Error RAR terdeteksi, mencoba WinRAR/7-Zip fallback");
-                                    
-                                    try
-                                    {
-                                        // Determine which file to use for extraction
-                                        string fileToExtract = archivePath;
-                                        if (isMultiPart && partFiles.Count > 1)
-                                        {
-                                            // Find first part
-                                            string? firstPartPath = null;
-                                            foreach (var partFile in partFiles)
-                                            {
-                                                var partExt = Path.GetExtension(partFile).ToLowerInvariant();
-                                                var partName = Path.GetFileName(partFile).ToLowerInvariant();
-                                                
-                                                if (partExt.Contains(".part1.rar") || 
-                                                    (partExt == ".rar" && !partName.Contains(".part")))
-                                                {
-                                                    firstPartPath = partFile;
-                                                    break;
-                                                }
-                                            }
-                                            if (firstPartPath == null && partFiles.Count > 0)
-                                            {
-                                                firstPartPath = partFiles[0];
-                                            }
-                                            if (firstPartPath != null)
-                                            {
-                                                fileToExtract = firstPartPath;
-                                            }
-                                        }
-                                        
-                                        var extractResult = await ExtractWithExternalToolAsync(fileToExtract, extractedFolder, password, isMultiPart ? partFiles : new List<string> { archivePath });
-                                        if (extractResult.success)
-                                        {
-                                            LogInfo($"Ekstraksi berhasil dengan WinRAR/7-Zip (fallback)");
-                                            // Skip SharpCompress extraction, files already extracted
-                                            processedFiles++;
-                                            var extractProgressPct = (int)((processedFiles * 100.0) / totalFiles);
-                                            if (sendProgress != null)
-                                            {
-                                                await sendProgress(new
-                                                {
-                                                    type = "FixGamesExtractProgress",
-                                                    percent = extractProgressPct,
-                                                    currentFile = processedFiles,
-                                                    totalFiles = totalFiles,
-                                                    currentArchive = file
-                                                });
-                                            }
-                                            continue; // Skip to next file - extraction successful
-                                        }
-                                        else
-                                        {
-                                            LogInfo($"WinRAR/7-Zip fallback juga gagal: {extractResult.error}");
-                                            // Continue to throw original error
-                                        }
-                                    }
-                                    catch (Exception toolEx)
-                                    {
-                                        LogInfo($"WinRAR/7-Zip fallback error: {toolEx.Message}");
-                                        // Continue to throw original error
-                                    }
-                                }
-                                
-                                // Provide more helpful error message
-                                string errorMsg = $"Gagal membuka file RAR: {ex.Message}";
-                                if (ex.Message.Contains("signature"))
-                                {
-                                    errorMsg += " File mungkin corrupt, tidak lengkap, atau bukan file RAR yang valid. Pastikan file sudah selesai di-download.";
-                                }
-                                else if (!string.IsNullOrWhiteSpace(password))
-                                {
-                                    errorMsg += " Pastikan password benar jika file dilindungi password.";
-                                }
-                                
-                                throw new Exception(errorMsg);
-                            }
+
+                            LogInfo($"RAR diekstrak dengan WinRAR/7-Zip: {file}");
                         }
                         else if (isZip)
                         {
-                            // Single ZIP file
                             try
                             {
                                 using var stream = File.OpenRead(archivePath);
@@ -1681,160 +1262,59 @@ namespace GameHubDesktop.Services
                                 {
                                     options.Password = password;
                                 }
-                                archive = ZipArchive.Open(stream, options);
+
+                                using var archive = ZipArchive.Open(stream, options);
+                                foreach (var entry in archive.Entries)
+                                {
+                                    if (entry.IsDirectory) continue;
+
+                                    var entryPath = Path.Combine(extractedFolder, entry.Key.Replace('/', Path.DirectorySeparatorChar));
+                                    var entryDir = Path.GetDirectoryName(entryPath);
+                                    if (!string.IsNullOrWhiteSpace(entryDir) && !Directory.Exists(entryDir))
+                                    {
+                                        Directory.CreateDirectory(entryDir);
+                                    }
+
+                                    using var entryStream = entry.OpenEntryStream();
+                                    using var fileStream = File.Create(entryPath);
+                                    await entryStream.CopyToAsync(fileStream);
+                                }
                             }
-                            catch (Exception ex)
+                            catch (Exception zipEx)
                             {
-                                LogInfo($"Gagal membuka ZIP archive: {ex.Message}");
-                                throw new Exception($"Gagal membuka file ZIP: {ex.Message}. Pastikan password benar jika file dilindungi password.");
+                                throw new Exception($"Gagal membuka file ZIP {file}: {zipEx.Message}");
                             }
                         }
-                        
-                        if (archive == null)
-                        {
-                            throw new Exception($"Tidak dapat membuka archive: {file}");
-                        }
-                        
-                        // Extract all entries
-                        int entryCount = 0;
-                        foreach (var entry in archive.Entries)
-                        {
-                            if (entry.IsDirectory) continue;
-                            
-                            entryCount++;
-                            var entryPath = Path.Combine(extractedFolder, entry.Key.Replace('/', Path.DirectorySeparatorChar));
-                            var entryDir = Path.GetDirectoryName(entryPath);
-                            
-                            if (entryDir != null && !Directory.Exists(entryDir))
-                            {
-                                Directory.CreateDirectory(entryDir);
-                            }
-                            
-                            // Extract entry
-                            try
-                            {
-                                using var entryStream = entry.OpenEntryStream();
-                                using var fileStream = File.Create(entryPath);
-                                await entryStream.CopyToAsync(fileStream);
-                            }
-                            catch (Exception ex)
-                            {
-                                LogInfo($"Error extracting entry {entry.Key}: {ex.Message}");
-                                // Continue with next entry
-                            }
-                            
-                            // Update progress per entry (optional, bisa di-comment jika terlalu banyak update)
-                            // Progress akan di-update per file archive, bukan per entry
-                        }
-                        
-                        LogInfo($"Berhasil mengekstrak {entryCount} entri dari {file}");
-                        processedFiles++;
-                        
-                        // Update progress: processedFiles / totalFiles
-                        var progressPercent = (int)((processedFiles * 100.0) / totalFiles);
+
+                        processedArchives++;
+                        var progressPercent = totalArchives > 0 ? (int)((processedArchives * 100.0) / totalArchives) : 0;
                         if (sendProgress != null)
                         {
                             await sendProgress(new
                             {
                                 type = "FixGamesExtractProgress",
                                 percent = progressPercent,
-                                currentFile = processedFiles,
-                                totalFiles = totalFiles,
+                                currentFile = processedArchives,
+                                totalFiles = totalArchives,
                                 currentArchive = file
                             });
                         }
                     }
                     catch (Exception ex)
                     {
-                        // If error occurs during extraction (not during opening), try WinRAR/7-Zip fallback
-                        bool shouldTryFallback = ex.Message.Contains("signature", StringComparison.OrdinalIgnoreCase) || 
-                                                 ex.Message.Contains("rar", StringComparison.OrdinalIgnoreCase) ||
-                                                 ex.Message.Contains("closed file", StringComparison.OrdinalIgnoreCase) ||
-                                                 ex.InnerException?.Message?.Contains("closed file", StringComparison.OrdinalIgnoreCase) == true;
-                        
-                        if (shouldTryFallback && isRar)
-                        {
-                            LogInfo($"Error ekstraksi terdeteksi, mencoba WinRAR/7-Zip fallback");
-                            
-                            try
-                            {
-                                // Determine which file to use for extraction
-                                string fileToExtract = archivePath;
-                                
-                                // Check if this was a multi-part RAR
-                                if (isMultiPart && partFiles.Count > 1)
-                                {
-                                    // Find first part
-                                    string? firstPartPath = null;
-                                    foreach (var partFile in partFiles)
-                                    {
-                                        var partExt = Path.GetExtension(partFile).ToLowerInvariant();
-                                        var partName = Path.GetFileName(partFile).ToLowerInvariant();
-                                        
-                                        if (partExt.Contains(".part1.rar") || 
-                                            (partExt == ".rar" && !partName.Contains(".part")))
-                                        {
-                                            firstPartPath = partFile;
-                                            break;
-                                        }
-                                    }
-                                    if (firstPartPath == null && partFiles.Count > 0)
-                                    {
-                                        firstPartPath = partFiles[0];
-                                    }
-                                    if (firstPartPath != null)
-                                    {
-                                        fileToExtract = firstPartPath;
-                                    }
-                                }
-                                
-                                var extractResult = await ExtractWithExternalToolAsync(fileToExtract, extractedFolder, password, isMultiPart && partFiles.Count > 1 ? partFiles : new List<string> { archivePath });
-                                
-                                if (extractResult.success)
-                                {
-                                    LogInfo($"Ekstraksi berhasil dengan WinRAR/7-Zip (fallback)");
-                                    // Skip SharpCompress extraction, files already extracted
-                                    processedFiles++;
-                                    var extractProgressPct = (int)((processedFiles * 100.0) / totalFiles);
-                                    if (sendProgress != null)
-                                    {
-                                        await sendProgress(new
-                                        {
-                                            type = "FixGamesExtractProgress",
-                                            percent = extractProgressPct,
-                                            currentFile = processedFiles,
-                                            totalFiles = totalFiles,
-                                            currentArchive = file
-                                        });
-                                    }
-                                    continue; // Skip to next file - extraction successful
-                                }
-                                else
-                                {
-                                    LogInfo($"[EXTRACT DEBUG] Fallback from outermost catch also failed: {extractResult.error}");
-                                    // Continue to throw original error
-                                }
-                            }
-                            catch (Exception toolEx)
-                            {
-                                LogInfo($"[EXTRACT DEBUG] Fallback from outermost catch error: {toolEx.Message}");
-                                // Continue to throw original error
-                            }
-                        }
-                        
                         throw new Exception($"Gagal mengekstrak {file}: {ex.Message}");
                     }
                 }
-                
-                LogInfo($"Ekstraksi selesai. Total {processedFiles}/{totalFiles} files diekstrak ke: {extractedFolder}");
-                
+
+                LogInfo($"Ekstraksi selesai. Total {processedArchives}/{totalArchives} archive diekstrak ke: {extractedFolder}");
+
                 return new
                 {
                     type = "FixGamesExtractComplete",
                     success = true,
                     extractedPath = extractedFolder,
-                    filesExtracted = processedFiles,
-                    totalFiles = totalFiles
+                    filesExtracted = processedArchives,
+                    totalFiles = totalArchives
                 };
             }
             catch (Exception ex)
@@ -1846,6 +1326,61 @@ namespace GameHubDesktop.Services
                     success = false,
                     error = ex.Message
                 };
+            }
+        }
+
+        private static string DetermineFirstPartFile(List<string> fileNames)
+        {
+            if (fileNames == null || fileNames.Count == 0)
+            {
+                throw new Exception("Daftar file untuk ekstraksi kosong");
+            }
+
+            // Prioritas: file dengan nama .part1.rar
+            var candidate = fileNames.FirstOrDefault(f => f.EndsWith(".part1.rar", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(candidate)) return candidate;
+
+            // Fallback: file .rar tanpa embel-embel .part
+            candidate = fileNames.FirstOrDefault(f =>
+                Path.GetExtension(f).Equals(".rar", StringComparison.OrdinalIgnoreCase) &&
+                !f.Contains(".part", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(candidate)) return candidate;
+
+            if (fileNames.Count > 1)
+            {
+                int PartNumber(string name)
+                {
+                    var match = Regex.Match(name, @"\.part(\d+)\.rar", RegexOptions.IgnoreCase);
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out var value)) return value;
+                    return int.MaxValue;
+                }
+
+                var ordered = fileNames
+                    .OrderBy(n => PartNumber(n))
+                    .ToList();
+                if (ordered.Count > 0)
+                {
+                    return ordered[0];
+                }
+            }
+
+            return fileNames[0];
+        }
+
+        private static void ValidatePartFiles(List<string> fileNames, string rootPath)
+        {
+            foreach (var partFile in fileNames)
+            {
+                var partPath = Path.Combine(rootPath, partFile);
+                if (!File.Exists(partPath))
+                {
+                    throw new Exception($"Part file tidak ditemukan: {partFile}");
+                }
+                var info = new FileInfo(partPath);
+                if (info.Length < 20)
+                {
+                    throw new Exception($"Part file terlalu kecil atau corrupt: {partFile} (size: {info.Length} bytes)");
+                }
             }
         }
 
@@ -2111,6 +1646,8 @@ namespace GameHubDesktop.Services
                 
                 var args = new System.Text.StringBuilder();
                 args.Append("x "); // Extract with full paths
+                args.Append("-ibck "); // Run in background (hide GUI)
+                args.Append("-inul "); // Suppress message boxes
                 args.Append("-o+ "); // Overwrite without prompt
                 
                 if (!string.IsNullOrWhiteSpace(password))
@@ -2133,6 +1670,7 @@ namespace GameHubDesktop.Services
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
                     WorkingDirectory = Path.GetDirectoryName(archivePath) ?? ""
                 };
                 
@@ -2493,6 +2031,494 @@ namespace GameHubDesktop.Services
                 cts.Cancel();
                 LogInfo($"Cancel requested for AppID: {appid}");
             }
+        }
+
+        // Scan executables in game folder
+        public Task<object> ScanExecutablesAsync(string gamePath, string? gameTitle = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(gamePath) || !Directory.Exists(gamePath))
+                {
+                    return Task.FromResult<object>(new
+                    {
+                        type = "FixGamesScanExecutables",
+                        success = false,
+                        error = "Game path tidak valid atau tidak ditemukan"
+                    });
+                }
+
+                LogInfo($"Memindai executable di: {RedactPath(gamePath)}");
+
+                var executables = new List<object>();
+                var exeFiles = Directory.GetFiles(gamePath, "*.exe", SearchOption.AllDirectories);
+
+                // Normalize game title untuk similarity comparison
+                string? normalizedGameTitle = null;
+                if (!string.IsNullOrWhiteSpace(gameTitle))
+                {
+                    // Remove special characters, convert to lowercase untuk comparison
+                    normalizedGameTitle = System.Text.RegularExpressions.Regex.Replace(gameTitle, @"[^a-zA-Z0-9]", "").ToLowerInvariant();
+                }
+
+                foreach (var exePath in exeFiles)
+                {
+                    try
+                    {
+                        var fileName = Path.GetFileName(exePath);
+                        var fileNameWithoutExt = Path.GetFileNameWithoutExtension(exePath);
+                        var relativePath = Path.GetRelativePath(gamePath, exePath);
+                        var fileInfo = new FileInfo(exePath);
+                        var size = fileInfo.Length;
+                        var directory = Path.GetDirectoryName(exePath);
+                        var relativeDir = !string.IsNullOrEmpty(directory) ? Path.GetRelativePath(gamePath, directory) : "";
+
+                        // Score executable berdasarkan heuristik
+                        int score = 0;
+                        int similarityScore = 0; // Similarity dengan nama game (0-100)
+
+                        // 1. Lokasi (root folder = +20, subfolder tertentu = +10)
+                        if (relativeDir == "" || relativeDir == ".")
+                        {
+                            score += 20; // Root folder
+                        }
+                        else
+                        {
+                            var dirLower = relativeDir.ToLowerInvariant();
+                            if (dirLower.Contains("bin") || dirLower.Contains("binaries") || 
+                                dirLower.Contains("game") || dirLower.Contains("win64") || 
+                                dirLower.Contains("win32") || dirLower == ".")
+                            {
+                                score += 10; // Subfolder yang umum untuk game exe
+                            }
+                        }
+
+                        // 2. Nama (hindari: uninstaller, setup, updater = -20)
+                        var nameLower = fileName.ToLowerInvariant();
+                        var nameWithoutExtLower = fileNameWithoutExt.ToLowerInvariant();
+                        if (nameLower.Contains("uninstall") || nameLower.Contains("setup") || 
+                            nameLower.Contains("updater") || nameLower.Contains("patcher") ||
+                            nameLower.Contains("launcher") || nameLower.Contains("installer") ||
+                            nameLower.Contains("dll") || nameLower.Contains("injector"))
+                        {
+                            score -= 20; // Bukan game exe
+                        }
+
+                        // 3. Ukuran (game exe biasanya > 1MB = +10)
+                        if (size > 1024 * 1024) // > 1MB
+                        {
+                            score += 10;
+                        }
+                        else if (size < 100 * 1024) // < 100KB
+                        {
+                            score -= 10; // Terlalu kecil, mungkin helper
+                        }
+
+                        // 4. Similarity dengan nama game (PRIORITAS UTAMA)
+                        if (!string.IsNullOrWhiteSpace(normalizedGameTitle) && !string.IsNullOrWhiteSpace(fileNameWithoutExt))
+                        {
+                            var normalizedExeName = System.Text.RegularExpressions.Regex.Replace(fileNameWithoutExt, @"[^a-zA-Z0-9]", "").ToLowerInvariant();
+                            
+                            // Check exact match atau substring
+                            if (normalizedExeName == normalizedGameTitle)
+                            {
+                                similarityScore = 100; // Exact match
+                            }
+                            else if (normalizedGameTitle.Contains(normalizedExeName) || normalizedExeName.Contains(normalizedGameTitle))
+                            {
+                                similarityScore = 80; // Contains match
+                            }
+                            else
+                            {
+                                // Calculate similarity using improved fuzzy matching
+                                similarityScore = CalculateFuzzySimilarity(normalizedGameTitle, normalizedExeName);
+                            }
+                        }
+
+                        // Set recommended jika similarity score tinggi ATAU score tinggi
+                        bool recommended = similarityScore >= 50 || score >= 30;
+
+                        // Extract icon from executable
+                        string? iconBase64 = null;
+                        try
+                        {
+                            iconBase64 = ExtractIconAsBase64(exePath);
+                        }
+                        catch (Exception iconEx)
+                        {
+                            // Icon extraction failed - continue without icon
+                            LogInfo($"Failed to extract icon from {RedactPath(exePath)}: {iconEx.Message}");
+                        }
+
+                        executables.Add(new
+                        {
+                            path = exePath,
+                            name = fileName,
+                            relativePath = relativePath.Replace('\\', '/'),
+                            size = size,
+                            score = score,
+                            similarityScore = similarityScore,
+                            recommended = recommended,
+                            iconBase64 = iconBase64
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        LogInfo($"Error processing exe {RedactPath(exePath)}: {ex.Message}");
+                    }
+                }
+
+                // Sort by recommended first (true first), then by similarity score, then by score, then by name
+                var sorted = executables.OrderByDescending(e => 
+                {
+                    var recommended = e.GetType().GetProperty("recommended")?.GetValue(e);
+                    return recommended is bool b && b;
+                }).ThenByDescending(e => 
+                {
+                    var simScore = e.GetType().GetProperty("similarityScore")?.GetValue(e) ?? 0;
+                    return simScore;
+                }).ThenByDescending(e => 
+                {
+                    var score = e.GetType().GetProperty("score")?.GetValue(e) ?? 0;
+                    return score;
+                }).ThenBy(e => 
+                {
+                    var name = e.GetType().GetProperty("name")?.GetValue(e)?.ToString() ?? "";
+                    return name;
+                }).ToList();
+
+                LogInfo($"Ditemukan {sorted.Count} executable");
+
+                return Task.FromResult<object>(new
+                {
+                    type = "FixGamesScanExecutables",
+                    success = true,
+                    executables = sorted
+                });
+            }
+            catch (Exception ex)
+            {
+                LogInfo($"Error scanning executables: {ex.Message}");
+                return Task.FromResult<object>(new
+                {
+                    type = "FixGamesScanExecutables",
+                    success = false,
+                    error = ex.Message
+                });
+            }
+        }
+
+        // Calculate similarity between two strings using improved fuzzy matching (0-100)
+        private int CalculateFuzzySimilarity(string gameTitle, string exeName)
+        {
+            if (string.IsNullOrEmpty(gameTitle) || string.IsNullOrEmpty(exeName)) return 0;
+            if (gameTitle == exeName) return 100;
+
+            // 1. Levenshtein Distance (weighted: 40%)
+            int levenshteinScore = CalculateLevenshteinSimilarity(gameTitle, exeName);
+
+            // 2. Acronym/Abbreviation matching (weighted: 30%)
+            // Check if exe name could be an acronym of game title (e.g., "re4" from "residentevil4")
+            int acronymScore = CalculateAcronymSimilarity(gameTitle, exeName);
+
+            // 3. Token-based matching (weighted: 20%)
+            // Split into tokens and match (e.g., "resident" "evil" "4" vs "re" "4")
+            int tokenScore = CalculateTokenSimilarity(gameTitle, exeName);
+
+            // 4. Common substring matching (weighted: 10%)
+            int substringScore = CalculateSubstringSimilarity(gameTitle, exeName);
+
+            // Weighted combination
+            int finalScore = (int)(
+                (levenshteinScore * 0.40) +
+                (acronymScore * 0.30) +
+                (tokenScore * 0.20) +
+                (substringScore * 0.10)
+            );
+
+            return Math.Min(100, Math.Max(0, finalScore));
+        }
+
+        // Levenshtein Distance similarity (0-100)
+        private int CalculateLevenshteinSimilarity(string s1, string s2)
+        {
+            if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0;
+            if (s1 == s2) return 100;
+
+            int maxLen = Math.Max(s1.Length, s2.Length);
+            if (maxLen == 0) return 100;
+
+            int distance = LevenshteinDistance(s1, s2);
+            int similarity = (int)((1.0 - (double)distance / maxLen) * 100);
+            return Math.Max(0, similarity);
+        }
+
+        // Levenshtein Distance algorithm
+        private int LevenshteinDistance(string s1, string s2)
+        {
+            int n = s1.Length;
+            int m = s2.Length;
+            int[,] d = new int[n + 1, m + 1];
+
+            if (n == 0) return m;
+            if (m == 0) return n;
+
+            for (int i = 0; i <= n; d[i, 0] = i++) { }
+            for (int j = 0; j <= m; d[0, j] = j++) { }
+
+            for (int i = 1; i <= n; i++)
+            {
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = (s2[j - 1] == s1[i - 1]) ? 0 : 1;
+                    d[i, j] = Math.Min(
+                        Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                        d[i - 1, j - 1] + cost);
+                }
+            }
+
+            return d[n, m];
+        }
+
+        // Acronym/Abbreviation similarity (e.g., "re4" matches "residentevil4")
+        private int CalculateAcronymSimilarity(string gameTitle, string exeName)
+        {
+            if (string.IsNullOrEmpty(gameTitle) || string.IsNullOrEmpty(exeName)) return 0;
+
+            // If exe name is shorter, it might be an acronym
+            if (exeName.Length >= gameTitle.Length) return 0;
+
+            // Extract potential acronym from game title (first letters of words or consecutive letters)
+            // For "residentevil4" -> could match "re4" if we check if exeName appears as pattern
+            int matchCount = 0;
+            int exeIndex = 0;
+
+            // Try to match exeName characters in order within gameTitle
+            for (int i = 0; i < gameTitle.Length && exeIndex < exeName.Length; i++)
+            {
+                if (gameTitle[i] == exeName[exeIndex])
+                {
+                    matchCount++;
+                    exeIndex++;
+                }
+            }
+
+            // If all characters of exeName were found in order in gameTitle
+            if (exeIndex == exeName.Length)
+            {
+                // Calculate score based on how much of exeName matches
+                return (int)((matchCount * 100.0) / exeName.Length);
+            }
+
+            // Also check reverse: if gameTitle characters appear in exeName in order
+            int gameIndex = 0;
+            matchCount = 0;
+            for (int i = 0; i < exeName.Length && gameIndex < gameTitle.Length; i++)
+            {
+                if (exeName[i] == gameTitle[gameIndex])
+                {
+                    matchCount++;
+                    gameIndex++;
+                }
+            }
+
+            if (gameIndex > 0)
+            {
+                return (int)((matchCount * 100.0) / Math.Min(gameTitle.Length, exeName.Length));
+            }
+
+            return 0;
+        }
+
+        // Token-based similarity (split by numbers and check word matches)
+        private int CalculateTokenSimilarity(string gameTitle, string exeName)
+        {
+            if (string.IsNullOrEmpty(gameTitle) || string.IsNullOrEmpty(exeName)) return 0;
+
+            // Split by numbers and extract tokens
+            var gameTokens = System.Text.RegularExpressions.Regex.Split(gameTitle, @"(\d+)")
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.ToLowerInvariant())
+                .ToList();
+
+            var exeTokens = System.Text.RegularExpressions.Regex.Split(exeName, @"(\d+)")
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.ToLowerInvariant())
+                .ToList();
+
+            if (gameTokens.Count == 0 || exeTokens.Count == 0) return 0;
+
+            // Check if exe tokens appear in game tokens (as substrings or exact)
+            int matchedTokens = 0;
+            foreach (var exeToken in exeTokens)
+            {
+                foreach (var gameToken in gameTokens)
+                {
+                    if (gameToken.Contains(exeToken) || exeToken.Contains(gameToken))
+                    {
+                        matchedTokens++;
+                        break;
+                    }
+                }
+            }
+
+            return (int)((matchedTokens * 100.0) / Math.Max(gameTokens.Count, exeTokens.Count));
+        }
+
+        // Common substring similarity
+        private int CalculateSubstringSimilarity(string s1, string s2)
+        {
+            if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0;
+
+            int maxLen = 0;
+            string longer = s1.Length > s2.Length ? s1 : s2;
+            string shorter = s1.Length > s2.Length ? s2 : s1;
+
+            // Find longest common substring
+            for (int i = 0; i < shorter.Length; i++)
+            {
+                for (int j = i + 1; j <= shorter.Length; j++)
+                {
+                    string substr = shorter.Substring(i, j - i);
+                    if (longer.Contains(substr) && substr.Length > maxLen)
+                    {
+                        maxLen = substr.Length;
+                    }
+                }
+            }
+
+            if (maxLen == 0) return 0;
+            return (int)((maxLen * 100.0) / Math.Max(s1.Length, s2.Length));
+        }
+
+        // Extract icon from executable and convert to base64 PNG
+        private string? ExtractIconAsBase64(string exePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                {
+                    return null;
+                }
+
+                // Extract icon from executable
+                Icon? icon = Icon.ExtractAssociatedIcon(exePath);
+                if (icon == null)
+                {
+                    return null;
+                }
+
+                // Convert icon to bitmap
+                using (icon)
+                using (Bitmap bitmap = icon.ToBitmap())
+                {
+                    // Resize to 32x32 for consistency and smaller size
+                    int size = 32;
+                    using (Bitmap resized = new Bitmap(bitmap, new Size(size, size)))
+                    {
+                        // Convert to PNG and then to base64
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            resized.Save(ms, ImageFormat.Png);
+                            byte[] imageBytes = ms.ToArray();
+                            return Convert.ToBase64String(imageBytes);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Return null if extraction fails
+                return null;
+            }
+        }
+
+        // Create desktop shortcut
+        public Task<object> CreateDesktopShortcutAsync(string exePath, string shortcutName, string gamePath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                {
+                    return Task.FromResult<object>(new
+                    {
+                        type = "FixGamesCreateShortcut",
+                        success = false,
+                        error = "Executable tidak ditemukan"
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(shortcutName))
+                {
+                    shortcutName = Path.GetFileNameWithoutExtension(exePath);
+                }
+
+                // Get desktop path
+                var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                var shortcutPath = Path.Combine(desktopPath, $"{shortcutName}.lnk");
+
+                // Create shortcut using COM (Windows Script Host)
+                try
+                {
+                    // Create WScript.Shell COM object
+                    Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
+                    if (shellType == null)
+                    {
+                        throw new Exception("Tidak dapat membuat WScript.Shell COM object");
+                    }
+                    
+                    object? shellObj = Activator.CreateInstance(shellType);
+                    if (shellObj == null)
+                    {
+                        throw new Exception("Gagal membuat instance WScript.Shell");
+                    }
+                    
+                    dynamic shell = shellObj;
+                    dynamic shortcut = shell.CreateShortcut(shortcutPath);
+
+                    shortcut.TargetPath = exePath;
+                    shortcut.WorkingDirectory = !string.IsNullOrWhiteSpace(gamePath) ? gamePath : Path.GetDirectoryName(exePath);
+                    shortcut.Description = $"Shortcut untuk {shortcutName}";
+                    shortcut.Save();
+
+                    LogInfo($"Shortcut berhasil dibuat: {RedactPath(shortcutPath)}");
+
+                    return Task.FromResult<object>(new
+                    {
+                        type = "FixGamesCreateShortcut",
+                        success = true,
+                        shortcutPath = shortcutPath
+                    });
+                }
+                catch (Exception ex)
+                {
+                    LogInfo($"Error creating shortcut via COM: {ex.Message}");
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogInfo($"Error creating desktop shortcut: {ex.Message}");
+                return Task.FromResult<object>(new
+                {
+                    type = "FixGamesCreateShortcut",
+                    success = false,
+                    error = ex.Message
+                });
+            }
+        }
+
+        private string RedactPath(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) return "";
+                var name = Path.GetFileName(path);
+                var root = Path.GetPathRoot(path);
+                var rootSafe = string.IsNullOrEmpty(root) ? "" : root + "...\\";
+                return string.IsNullOrEmpty(name) ? "(path disamarkan)" : rootSafe + name;
+            }
+            catch { return "(path disamarkan)"; }
         }
     }
 }

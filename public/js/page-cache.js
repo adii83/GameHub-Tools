@@ -70,7 +70,7 @@
           inMemoryOnly: true
         }));
       } catch (e2) {
-        console.warn('Failed to save cache meta:', e2);
+        // Failed to save cache meta - non-critical
       }
     }
   }
@@ -88,7 +88,6 @@
       }
       return data;
     } catch (e) {
-      console.warn('Failed to load cache:', e);
       return null;
     }
   }
@@ -99,7 +98,7 @@
       localStorage.removeItem(dataKey);
       localStorage.removeItem(metaKey);
     } catch (e) {
-      console.warn('Failed to clear cache:', e);
+      // Failed to clear cache - non-critical
     }
   }
   

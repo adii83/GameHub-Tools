@@ -547,8 +547,7 @@ async function openDetail(appid) {
       // Plan premium: allow semua game (tidak perlu cek)
     }
   } catch (e) {
-    // Jika error, tetap lanjutkan (fallback untuk development)
-    console.warn('License check error:', e);
+    // License check error - non-critical
   }
 
   const drawer = document.getElementById('detail-drawer');
@@ -1436,7 +1435,7 @@ window.handleTrashClick = handleTrashClick;
               }
             }
           } catch (e) {
-            console.error('Error handling RemoveGameResult:', e);
+            // Error handling result - non-critical
           }
         } else if (msg.type === 'ClearAllCacheResult') {
           // Handle clear cache result - forward to any waiting promises

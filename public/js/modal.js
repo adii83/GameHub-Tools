@@ -111,13 +111,13 @@ function showPremiumModal(options = {}) {
         try {
           onConfirm();
         } catch (e) {
-          console.error('Error in onConfirm callback:', e);
+          // Error in callback - non-critical
         }
       } else if (!result && onCancel) {
         try {
           onCancel();
         } catch (e) {
-          console.error('Error in onCancel callback:', e);
+          // Error in callback - non-critical
         }
       }
     }, 0);

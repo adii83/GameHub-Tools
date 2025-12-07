@@ -15,11 +15,9 @@ async function loadGames() {
     if (window.desktopBridge && typeof window.desktopBridge.forceUpdateOverride === 'function') {
       try {
         const result = await window.desktopBridge.forceUpdateOverride();
-        if (!result.success) {
-          console.warn('Force update override failed:', result.error);
-        }
+        // Force update override - result handled silently
       } catch (e) {
-        console.warn('Force update override error:', e);
+        // Force update override error - non-critical
       }
     }
     
@@ -28,7 +26,7 @@ async function loadGames() {
       try {
         window.FixGamesPageCache.clear();
       } catch (e) {
-        console.warn('Failed to clear fix games cache:', e);
+        // Failed to clear cache - non-critical
       }
     }
     // Force refresh fix games data via bridge
@@ -36,7 +34,16 @@ async function loadGames() {
       try {
         await window.desktopBridge.getFixGamesData(true); // forceRefresh = true
       } catch (e) {
-        console.warn('Force refresh fix games failed:', e);
+        // Force refresh failed - non-critical
+      }
+    }
+    
+    // 2b. Force refresh steam games data via bridge
+    if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+      try {
+        await window.desktopBridge.getSteamGamesData(true); // forceRefresh = true
+      } catch (e) {
+        // Force refresh failed - non-critical
       }
     }
     
@@ -48,7 +55,7 @@ async function loadGames() {
       try {
         window.GamesPageCache.clear();
       } catch (e) {
-        console.warn('Failed to clear games page cache:', e);
+        // Failed to clear cache - non-critical
       }
     }
     

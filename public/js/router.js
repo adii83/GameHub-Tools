@@ -100,7 +100,7 @@ async function navigate(page, params = {}) {
             applyFilters(true);
           }
         } catch (e) {
-          console.warn('Error applying filters after init:', e);
+          // Error applying filters - non-critical
         }
       }, 150);
     } else if (typeof loadGames === "function") {
@@ -113,7 +113,7 @@ async function navigate(page, params = {}) {
             applyFilters(true);
           }
         } catch (e) {
-          console.warn('Error applying filters after load:', e);
+          // Error applying filters - non-critical
         }
       }, 150);
     }
@@ -149,6 +149,8 @@ async function navigate(page, params = {}) {
 
   // Jika halaman adalah Fix Games Detail → load detail page
   if (page === "fix-games-detail") {
+    // Check if this is steam-account category
+    const isSteamAccount = params.isSteamAccount === true;
     // Get appid from navigate params
     const navigateParams = window._lastNavigateParams || {};
     const appid = navigateParams.appid;
@@ -166,7 +168,7 @@ async function navigate(page, params = {}) {
       script.onload = () => {
         setTimeout(() => {
           if (typeof initFixGameDetailPage === 'function') {
-            initFixGameDetailPage(parseInt(appid));
+            initFixGameDetailPage(parseInt(appid), isSteamAccount);
           }
         }, 50);
       };
@@ -174,7 +176,7 @@ async function navigate(page, params = {}) {
     } else {
       setTimeout(() => {
         if (typeof initFixGameDetailPage === 'function') {
-          initFixGameDetailPage(parseInt(appid));
+          initFixGameDetailPage(parseInt(appid), isSteamAccount);
         }
       }, 50);
     }
@@ -250,7 +252,9 @@ async function navigate(page, params = {}) {
             
             if (keyDisplay) keyDisplay.textContent = licenseInfo.licenseKey || '-';
             if (deviceDisplay) deviceDisplay.textContent = licenseInfo.deviceId || '-';
-          }).catch(e => console.warn('Failed to load license info:', e));
+          }).catch(e => {
+            // Failed to load license info - non-critical
+          });
         }
       }
       
@@ -317,8 +321,7 @@ async function loadLicenseInfo() {
       }
     }
   } catch (e) {
-    console.warn('Failed to load license info:', e);
-    // Set default values jika error
+    // Failed to load license info - set default values
     const planBadge = document.getElementById('license-plan-badge');
     const keyDisplay = document.getElementById('license-key-display');
     const deviceDisplay = document.getElementById('license-device-display');
