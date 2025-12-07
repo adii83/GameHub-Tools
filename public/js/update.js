@@ -421,6 +421,12 @@ const UpdatePanel = (() => {
   }
 
   async function checkForUpdates({ forceRefresh = true, silent = false } = {}) {
+    if (state.isChecking) {
+      if (!silent && typeof premiumAlert === 'function') {
+        premiumAlert('Sedang mengecek update. Tunggu sebentar...', 'Info');
+      }
+      return;
+    }
     if (!window.desktopBridge || typeof window.desktopBridge.checkForUpdates !== 'function') {
       if (!silent && typeof premiumAlert === 'function') {
         premiumAlert('Bridge tidak tersedia', 'Error');
