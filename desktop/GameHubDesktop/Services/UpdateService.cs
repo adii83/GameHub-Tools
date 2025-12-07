@@ -450,7 +450,12 @@ namespace GameHubDesktop.Services
             var remoteName = Path.GetFileName(uri.LocalPath);
             if (!string.IsNullOrWhiteSpace(remoteName))
             {
-                return remoteName;
+                var timestampSuffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var baseName = Path.GetFileNameWithoutExtension(remoteName);
+                var ext = Path.GetExtension(remoteName);
+                return string.IsNullOrWhiteSpace(baseName)
+                    ? $"GameHubSetup-{timestampSuffix}{ext}"
+                    : $"{baseName}-{timestampSuffix}{ext}";
             }
             var versionPart = string.IsNullOrWhiteSpace(metadata.Version) ? DateTime.UtcNow.ToString("yyyyMMddHHmmss") : metadata.Version;
             return $"GameHubSetup-{versionPart}.exe";
