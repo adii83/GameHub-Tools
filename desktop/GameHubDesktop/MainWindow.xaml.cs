@@ -957,7 +957,7 @@ namespace GameHubDesktop
                         {
                             try
                             {
-                                var result = await _updateService.InstallUpdateAsync(metadata, async progress =>
+                                var result = await _updateService.PrepareInstallerAsync(metadata, async progress =>
                                 {
                                     await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                                     {
@@ -998,6 +998,46 @@ namespace GameHubDesktop
                                         error = ex.Message
                                     });
                                 });
+                            }
+                        });
+                        break;
+                    }
+                    case "QuitAndInstallUpdate":
+                    {
+                        var installerPath = msg.payload.TryGetProperty("installerPath", out var ip) ? ip.GetString() : null;
+                        bool launched = false;
+                        try
+                        {
+                            launched = _updateService.LaunchInstallerInteractive(installerPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"QuitAndInstallUpdate error: {ex.Message}");
+                            launched = false;
+                        }
+
+                        if (!launched)
+                        {
+                            SendToJs(new { type = "QuitAndInstallResult", success = false, error = "Installer tidak dapat dijalankan. Pastikan file masih tersedia." });
+                            break;
+                        }
+
+                        SendToJs(new { type = "QuitAndInstallResult", success = true });
+
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await Task.Delay(500);
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    try { Close(); } catch { }
+                                    try { System.Windows.Application.Current?.Shutdown(); } catch { }
+                                });
+                            }
+                            catch
+                            {
+                                // ignore
                             }
                         });
                         break;

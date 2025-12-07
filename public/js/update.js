@@ -517,7 +517,7 @@ const UpdatePanel = (() => {
       const notes = state.metadata.releaseNotes.map((note) => `• ${note}`);
       lines.push('Catatan rilis:\n' + notes.join('\n'));
     }
-    lines.push('GameHub akan mengunduh installer resmi dan menjalankannya secara otomatis. Simpan pekerjaan Anda sebelum melanjutkan.');
+    lines.push('GameHub akan mengunduh installer resmi, lalu meminta izin sebelum menutup aplikasi dan membuka installer terbaru. Simpan pekerjaan Anda sebelum melanjutkan.');
     return lines.join('\n\n');
   }
 
@@ -558,15 +558,13 @@ const UpdatePanel = (() => {
         if (typeof premiumAlert === 'function') {
           premiumAlert(`Install gagal: ${errorMessage}`, 'Error');
         }
-      } else {
-        state.lastInstallerPath = result.installerPath || state.lastInstallerPath;
-        state.installMessage = 'Update berhasil dipasang. Tutup dan buka ulang GameHub untuk memakai versi terbaru.';
-        state.lastError = null;
-        if (typeof premiumAlert === 'function') {
-          premiumAlert('Update berhasil dipasang! GameHub akan tetap berjalan hingga Anda menutupnya.', 'Berhasil');
-        }
+        return result;
       }
 
+      state.lastInstallerPath = result.installerPath || state.lastInstallerPath;
+      state.installMessage = 'Installer siap. Klik "Lanjutkan" untuk menutup GameHub dan menjalankan installer resmi.';
+      state.lastError = null;
+      showInstallShutdownModal(state.lastInstallerPath);
       return result;
     } catch (error) {
       state.lastError = error?.message || 'Install gagal';
@@ -687,3 +685,43 @@ if (document.readyState === 'loading') {
 }
 
 window.GameHubUpdatePanel = UpdatePanel;
+
+function showInstallShutdownModal(installerPath) {
+  const message = 'GameHub akan ditutup dan installer terbaru akan dibuka secara otomatis. Setelah instalasi selesai, jalankan ulang GameHub secara manual.';
+
+  const confirmAction = async () => {
+    if (!window.desktopBridge || typeof window.desktopBridge.quitAndInstallUpdate !== 'function') {
+      if (typeof premiumAlert === 'function') {
+        premiumAlert('Bridge tidak tersedia. Jalankan installer secara manual dari folder download.', 'Error');
+      }
+      return;
+    }
+    try {
+      const result = await window.desktopBridge.quitAndInstallUpdate(installerPath || null);
+      if (!result || result.success === false) {
+        if (typeof premiumAlert === 'function') {
+          premiumAlert(result?.error || 'Installer gagal dijalankan. Coba ulangi dari pengaturan.', 'Error');
+        }
+      }
+    } catch (error) {
+      if (typeof premiumAlert === 'function') {
+        const msg = error?.message || 'Gagal menjalankan installer';
+        premiumAlert(`Gagal menjalankan installer: ${msg}`, 'Error');
+      }
+    }
+  };
+
+  if (typeof showPremiumModal === 'function') {
+    showPremiumModal({
+      title: 'Installer siap',
+      message,
+      type: 'confirm',
+      confirmText: 'Lanjutkan',
+      cancelText: 'Batal',
+      showCancel: false,
+      onConfirm: confirmAction
+    });
+  } else if (window.confirm(message)) {
+    confirmAction();
+  }
+}
