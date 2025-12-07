@@ -12,7 +12,7 @@ namespace GameHubDesktop.Services
     public class UpdateService
     {
         private const string METADATA_URL = "https://raw.githubusercontent.com/adii83/GameHub-Tools/main/public/update/latest.json";
-        private const string USER_AGENT = "GameHubDesktop/1.0";
+        private const string USER_AGENT = "GameHub/1.0";
         private static readonly HttpClient Http = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(30)
