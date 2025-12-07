@@ -1,8 +1,8 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.0",
   "publishedAt": "2025-12-08T18:39:45Z",
-  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v1.0.3/GameHubSetup.exe",
-  "sha256": "2DA05E6A5B1F0C5C5C8EC6D1175B7ED7577C1686F96390D903D3FC5D45FA82CD",
+  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v1.0.0/GameHubSetup.exe",
+  "sha256": "55FF7F21B018126E60349A48F95EE3BA797EA53BFE407AF27399D93FD50C07F1",
   "mandatory": false,
   "releaseNotes": [
     "Rilis awal GameHub.",
