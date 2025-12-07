@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -210,6 +211,151 @@ namespace GameHubDesktop.Services
             }
         }
 
+        public async Task<UpdateInstallResult> InstallUpdateAsync(UpdateMetadata metadata, Func<UpdateInstallProgress, Task>? progressCallback = null, CancellationToken cancellationToken = default)
+        {
+            if (metadata == null)
+            {
+                return new UpdateInstallResult
+                {
+                    Success = false,
+                    Error = "Metadata update tidak tersedia"
+                };
+            }
+
+            var downloadResult = await DownloadInstallerAsync(metadata, async progress =>
+            {
+                if (progressCallback != null)
+                {
+                    await progressCallback(new UpdateInstallProgress
+                    {
+                        Stage = UpdateInstallStage.Downloading,
+                        Percent = progress.Percent,
+                        BytesReceived = progress.BytesReceived,
+                        TotalBytes = progress.TotalBytes,
+                        Message = "Mengunduh installer..."
+                    }).ConfigureAwait(false);
+                }
+            }, cancellationToken).ConfigureAwait(false);
+
+            if (downloadResult == null || !downloadResult.Success || string.IsNullOrWhiteSpace(downloadResult.InstallerPath))
+            {
+                return new UpdateInstallResult
+                {
+                    Success = false,
+                    Error = downloadResult?.Error ?? "Download installer gagal"
+                };
+            }
+
+            if (progressCallback != null)
+            {
+                await progressCallback(new UpdateInstallProgress
+                {
+                    Stage = UpdateInstallStage.DownloadCompleted,
+                    InstallerPath = downloadResult.InstallerPath,
+                    Message = "Download selesai, menyiapkan installer..."
+                }).ConfigureAwait(false);
+            }
+
+            var installResult = await RunInstallerAsync(downloadResult.InstallerPath, progressCallback, cancellationToken).ConfigureAwait(false);
+            installResult.Metadata = metadata;
+            return installResult;
+        }
+
+        private async Task<UpdateInstallResult> RunInstallerAsync(string installerPath, Func<UpdateInstallProgress, Task>? progressCallback, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
+            {
+                return new UpdateInstallResult
+                {
+                    Success = false,
+                    Error = "Installer tidak ditemukan",
+                    InstallerPath = installerPath
+                };
+            }
+
+            try
+            {
+                if (progressCallback != null)
+                {
+                    await progressCallback(new UpdateInstallProgress
+                    {
+                        Stage = UpdateInstallStage.Installing,
+                        InstallerPath = installerPath,
+                        Message = "Menjalankan installer..."
+                    }).ConfigureAwait(false);
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    Arguments = "/VERYSILENT /NORESTART",
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(installerPath) ?? AppContext.BaseDirectory
+                };
+
+                try
+                {
+                    psi.Verb = "runas";
+                }
+                catch
+                {
+                    // Verb not supported - ignore
+                }
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    return new UpdateInstallResult
+                    {
+                        Success = false,
+                        Error = "Gagal menjalankan installer",
+                        InstallerPath = installerPath
+                    };
+                }
+
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                var exitCode = process.ExitCode;
+                var success = exitCode == 0;
+
+                if (progressCallback != null)
+                {
+                    await progressCallback(new UpdateInstallProgress
+                    {
+                        Stage = UpdateInstallStage.Completed,
+                        InstallerPath = installerPath,
+                        ExitCode = exitCode,
+                        Message = success ? "Installer selesai" : $"Installer keluar dengan kode {exitCode}"
+                    }).ConfigureAwait(false);
+                }
+
+                return new UpdateInstallResult
+                {
+                    Success = success,
+                    InstallerPath = installerPath,
+                    ExitCode = exitCode,
+                    Error = success ? null : $"Installer keluar dengan kode {exitCode}"
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                return new UpdateInstallResult
+                {
+                    Success = false,
+                    InstallerPath = installerPath,
+                    Error = "Instalasi dibatalkan"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new UpdateInstallResult
+                {
+                    Success = false,
+                    InstallerPath = installerPath,
+                    Error = ex.Message
+                };
+            }
+        }
+
         private async Task<UpdateMetadata> FetchMetadataAsync(CancellationToken cancellationToken)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, METADATA_URL);
@@ -368,6 +514,34 @@ namespace GameHubDesktop.Services
         public long BytesReceived { get; set; }
         public long TotalBytes { get; set; }
         public int Percent { get; set; }
+    }
+
+    public enum UpdateInstallStage
+    {
+        Downloading,
+        DownloadCompleted,
+        Installing,
+        Completed
+    }
+
+    public class UpdateInstallProgress
+    {
+        public UpdateInstallStage Stage { get; set; }
+        public int? Percent { get; set; }
+        public long? BytesReceived { get; set; }
+        public long? TotalBytes { get; set; }
+        public string? Message { get; set; }
+        public string? InstallerPath { get; set; }
+        public int? ExitCode { get; set; }
+    }
+
+    public class UpdateInstallResult
+    {
+        public bool Success { get; set; }
+        public string? Error { get; set; }
+        public string? InstallerPath { get; set; }
+        public int? ExitCode { get; set; }
+        public UpdateMetadata? Metadata { get; set; }
     }
 
     public class UpdateState

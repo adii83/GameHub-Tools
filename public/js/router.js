@@ -265,6 +265,11 @@ async function navigate(page, params = {}) {
         // Load initial logs
         window.desktopBridge.send('GetAppLog', {});
       }
+
+      // Mount update panel DOM binding setelah page siap
+      if (window.GameHubUpdatePanel && typeof window.GameHubUpdatePanel.mount === 'function') {
+        window.GameHubUpdatePanel.mount();
+      }
     }, 100);
   } else {
     // Unsubscribe dari logs saat keluar dari Settings page

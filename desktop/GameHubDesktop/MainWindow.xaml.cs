@@ -929,6 +929,79 @@ namespace GameHubDesktop
                         });
                         break;
                     }
+                    case "InstallLatestUpdate":
+                    {
+                        if (!msg.payload.TryGetProperty("metadata", out var metadataElement) || metadataElement.ValueKind == JsonValueKind.Undefined || metadataElement.ValueKind == JsonValueKind.Null)
+                        {
+                            SendToJs(new { type = "UpdateInstallComplete", success = false, error = "Metadata update tidak tersedia" });
+                            break;
+                        }
+
+                        Services.UpdateMetadata? metadata = null;
+                        try
+                        {
+                            metadata = JsonSerializer.Deserialize<Services.UpdateMetadata>(metadataElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"InstallLatestUpdate metadata parse error: {ex.Message}");
+                        }
+
+                        if (metadata == null)
+                        {
+                            SendToJs(new { type = "UpdateInstallComplete", success = false, error = "Metadata update tidak valid" });
+                            break;
+                        }
+
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var result = await _updateService.InstallUpdateAsync(metadata, async progress =>
+                                {
+                                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                    {
+                                        SendToJs(new
+                                        {
+                                            type = "UpdateInstallProgress",
+                                            stage = progress.Stage.ToString(),
+                                            percent = progress.Percent,
+                                            bytesReceived = progress.BytesReceived,
+                                            totalBytes = progress.TotalBytes,
+                                            message = progress.Message,
+                                            installerPath = progress.InstallerPath,
+                                            exitCode = progress.ExitCode
+                                        });
+                                    });
+                                }).ConfigureAwait(false);
+
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateInstallComplete",
+                                        success = result.Success,
+                                        error = result.Error,
+                                        installerPath = result.InstallerPath,
+                                        exitCode = result.ExitCode
+                                    });
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateInstallComplete",
+                                        success = false,
+                                        error = ex.Message
+                                    });
+                                });
+                            }
+                        });
+                        break;
+                    }
                     case "FixGamesCheckAntivirus":
                     {
                         _ = Task.Run(async () =>
