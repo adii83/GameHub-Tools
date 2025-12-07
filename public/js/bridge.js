@@ -11,6 +11,107 @@
         // silent
       }
     },
+    async getUpdateState() {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+          reject(new Error('getUpdateState timeout'));
+        }, 10000);
+
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            if (data?.type === 'UpdateState') {
+              clearTimeout(timeout);
+              try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+              resolve(data);
+            }
+          } catch (error) {
+            clearTimeout(timeout);
+            try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+            reject(error);
+          }
+        };
+
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetUpdateState', {});
+      });
+    },
+    async checkForUpdates(forceRefresh = false) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+          reject(new Error('checkForUpdates timeout'));
+        }, 30000);
+
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            if (data?.type === 'UpdateCheckResult') {
+              clearTimeout(timeout);
+              try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+              resolve(data);
+            }
+          } catch (error) {
+            clearTimeout(timeout);
+            try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+            reject(error);
+          }
+        };
+
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('CheckForUpdates', { forceRefresh });
+      });
+    },
+    async downloadUpdate(metadata, progressCallback = null) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('downloadUpdate timeout'));
+        }, 600000); // 10 minutes
+
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            if (data?.type === 'UpdateDownloadProgress') {
+              if (progressCallback) {
+                try { progressCallback(data); } catch (e) {}
+              }
+            } else if (data?.type === 'UpdateDownloadComplete') {
+              cleanup();
+              resolve(data);
+            }
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        };
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+        };
+
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('DownloadUpdateInstaller', { metadata });
+      });
+    },
     onMessage(handler) {
       if (!hasWebView) return;
       try {
