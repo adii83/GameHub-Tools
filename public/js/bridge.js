@@ -151,6 +151,41 @@
         api.send('InstallLatestUpdate', { metadata });
       });
     },
+    async quitAndInstallUpdate(installerPath) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('quitAndInstallUpdate timeout'));
+        }, 30000);
+
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            if (data?.type === 'QuitAndInstallResult') {
+              cleanup();
+              resolve(data);
+            }
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        };
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+        };
+
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('QuitAndInstallUpdate', { installerPath });
+      });
+    },
     onMessage(handler) {
       if (!hasWebView) return;
       try {

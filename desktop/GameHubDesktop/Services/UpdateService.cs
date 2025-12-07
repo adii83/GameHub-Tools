@@ -211,7 +211,7 @@ namespace GameHubDesktop.Services
             }
         }
 
-        public async Task<UpdateInstallResult> InstallUpdateAsync(UpdateMetadata metadata, Func<UpdateInstallProgress, Task>? progressCallback = null, CancellationToken cancellationToken = default)
+        public async Task<UpdateInstallResult> PrepareInstallerAsync(UpdateMetadata metadata, Func<UpdateInstallProgress, Task>? progressCallback = null, CancellationToken cancellationToken = default)
         {
             if (metadata == null)
             {
@@ -252,11 +252,27 @@ namespace GameHubDesktop.Services
                 {
                     Stage = UpdateInstallStage.DownloadCompleted,
                     InstallerPath = downloadResult.InstallerPath,
-                    Message = "Download selesai, menyiapkan installer..."
+                    Message = "Download selesai. Installer siap dijalankan."
                 }).ConfigureAwait(false);
             }
 
-            var installResult = await RunInstallerAsync(downloadResult.InstallerPath, progressCallback, cancellationToken).ConfigureAwait(false);
+            return new UpdateInstallResult
+            {
+                Success = true,
+                InstallerPath = downloadResult.InstallerPath,
+                Metadata = metadata
+            };
+        }
+
+        public async Task<UpdateInstallResult> InstallUpdateAsync(UpdateMetadata metadata, Func<UpdateInstallProgress, Task>? progressCallback = null, CancellationToken cancellationToken = default)
+        {
+            var prepareResult = await PrepareInstallerAsync(metadata, progressCallback, cancellationToken).ConfigureAwait(false);
+            if (prepareResult == null || !prepareResult.Success || string.IsNullOrWhiteSpace(prepareResult.InstallerPath))
+            {
+                return prepareResult ?? new UpdateInstallResult { Success = false, Error = "Persiapan installer gagal" };
+            }
+
+            var installResult = await RunInstallerAsync(prepareResult.InstallerPath, progressCallback, cancellationToken).ConfigureAwait(false);
             installResult.Metadata = metadata;
             return installResult;
         }
@@ -472,6 +488,47 @@ namespace GameHubDesktop.Services
         private void LogInfo(string message)
         {
             try { Log?.Invoke($"[UpdateService] {message}"); } catch { }
+        }
+
+        public bool LaunchInstallerInteractive(string? installerPath = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(installerPath))
+                {
+                    var state = LoadState();
+                    installerPath = state.LastDownloadedInstallerPath;
+                }
+
+                if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
+                {
+                    LogInfo("LaunchInstallerInteractive aborted - installer missing");
+                    return false;
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(installerPath) ?? AppContext.BaseDirectory
+                };
+
+                try { psi.Verb = "runas"; } catch { }
+
+                var process = Process.Start(psi);
+                if (process == null)
+                {
+                    LogInfo("LaunchInstallerInteractive failed to start process");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogInfo($"LaunchInstallerInteractive error: {ex.Message}");
+                return false;
+            }
         }
     }
 
