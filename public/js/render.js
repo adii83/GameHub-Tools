@@ -653,7 +653,7 @@ async function initGamesPage() {
           try {
             applyFilters(false); // false = jangan render lagi, karena sudah render di bawah
           } catch (e) {
-            console.warn('Error applying filters after cache restore:', e);
+            // Error applying filters - non-critical
           }
         }, 50);
       }
@@ -736,7 +736,7 @@ async function initGamesPage() {
           try {
             window.GamesPageCache.set(originalData, filteredData);
           } catch (e) {
-            console.warn('Failed to save games cache:', e);
+            // Failed to save cache - non-critical
           }
         }, 0);
       }
@@ -748,7 +748,7 @@ async function initGamesPage() {
           try {
             applyFilters(false); // false = jangan render lagi, karena akan render di bawah
           } catch (e) {
-            console.warn('Error applying filters after normalize:', e);
+            // Error applying filters - non-critical
           }
         }, 50);
       }
@@ -780,7 +780,7 @@ async function initGamesPage() {
           try {
             applyFilters(false);
           } catch (e) {
-            console.warn('Error applying filters after sample load:', e);
+            // Error applying filters - non-critical
           }
         }, 50);
       }
@@ -842,7 +842,7 @@ async function refreshGithubRaw(forceRefresh = false) {
         try {
           applyFilters(false); // false = jangan render lagi, karena akan render di bawah
         } catch (e) {
-          console.warn('Error applying filters after refresh:', e);
+          // Error applying filters - non-critical
         }
       }, 50);
     }

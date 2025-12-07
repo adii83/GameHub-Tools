@@ -209,14 +209,14 @@ namespace GameHubDesktop.Services
                     _running.TryRemove(appid, out _);
                     return;
                 }
-                int providerCount = 0; foreach (var _ in list.EnumerateArray()) providerCount++; LogInfo($"Jumlah penyedia API: {providerCount}");
 
                 using var http = new HttpClient();
-                http.Timeout = TimeSpan.FromSeconds(30);
+                http.Timeout = TimeSpan.FromSeconds(10);
 
                 string downloadsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GameHub", "downloads");
                 Directory.CreateDirectory(downloadsRoot);
 
+                // Proses API sesuai urutan di api.json (GameHub akan dipanggil pertama jika enabled)
                 foreach (var entry in list.EnumerateArray())
                 {
                     if (cts.IsCancellationRequested) throw new OperationCanceledException();

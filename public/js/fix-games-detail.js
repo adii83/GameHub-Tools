@@ -5,7 +5,7 @@ let currentAppId = null;
 let isProcessing = false;
 
 // Initialize detail page
-async function initFixGameDetailPage(appid) {
+async function initFixGameDetailPage(appid, isSteamAccount = false) {
   currentAppId = appid;
   isProcessing = false;
   
@@ -19,60 +19,104 @@ async function initFixGameDetailPage(appid) {
       return;
     }
     
-    // Load game data dari fixGamesData (harus sudah ter-load di fix-games.js)
+    // Load game data
     let gameData = null;
     
-    // Cek dari window.fixGamesData (dari fix-games.js) - retry beberapa kali jika belum ter-load
-    let retryCount = 0;
-    const maxRetries = 5;
-    
-    while (!gameData && retryCount < maxRetries) {
-      // Cek dari window.fixGamesData
-      if (typeof window.fixGamesData !== 'undefined' && Array.isArray(window.fixGamesData) && window.fixGamesData.length > 0) {
-        gameData = window.fixGamesData.find(g => {
-          const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
-          return gAppid === appidNum;
-        });
-      }
+    if (isSteamAccount) {
+      // Load from steam_games.json
+      let retryCount = 0;
+      const maxRetries = 5;
       
-      if (gameData) break;
-      
-      // Tunggu sebentar sebelum retry (jika data belum ter-load)
-      if (retryCount < maxRetries - 1) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      retryCount++;
-    }
-    
-    // Jika tidak ditemukan, coba load dari GitHub raw
-    if (!gameData) {
-      const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/refs/heads/main/fix_games.json';
-      try {
-        const response = await fetch(GITHUB_RAW_URL, { cache: 'no-store' });
-        if (response.ok) {
-          const json = await response.json();
-          if (json && json.games && Array.isArray(json.games)) {
-            gameData = json.games.find(g => {
-              const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
-              return gAppid === appidNum;
-            });
-          }
+      while (!gameData && retryCount < maxRetries) {
+        if (typeof window.steamGamesData !== 'undefined' && Array.isArray(window.steamGamesData) && window.steamGamesData.length > 0) {
+          gameData = window.steamGamesData.find(g => {
+            const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
+            return gAppid === appidNum;
+          });
         }
-      } catch (e) {
-        console.error('Failed to load game data:', e);
+        
+        if (gameData) break;
+        
+        if (retryCount < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        retryCount++;
+      }
+      
+      // Fallback: load from GitHub
+      if (!gameData) {
+        const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
+        try {
+          const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
+          if (response.ok) {
+            const json = await response.json();
+            if (Array.isArray(json)) {
+              gameData = json.find(g => {
+                const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
+                return gAppid === appidNum;
+              });
+            }
+          }
+        } catch (e) {
+          // Error loading game data - handled silently
+        }
+      }
+    } else {
+      // Load from fix_games.json (existing logic)
+      let retryCount = 0;
+      const maxRetries = 5;
+      
+      while (!gameData && retryCount < maxRetries) {
+        if (typeof window.fixGamesData !== 'undefined' && Array.isArray(window.fixGamesData) && window.fixGamesData.length > 0) {
+          gameData = window.fixGamesData.find(g => {
+            const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
+            return gAppid === appidNum;
+          });
+        }
+        
+        if (gameData) break;
+        
+        if (retryCount < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        retryCount++;
+      }
+      
+      // Fallback: load from GitHub
+      if (!gameData) {
+        const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/refs/heads/main/fix_games.json';
+        try {
+          const response = await fetch(GITHUB_RAW_URL, { cache: 'no-store' });
+          if (response.ok) {
+            const json = await response.json();
+            if (json && json.games && Array.isArray(json.games)) {
+              gameData = json.games.find(g => {
+                const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
+                return gAppid === appidNum;
+              });
+            }
+          }
+        } catch (e) {
+          // Error loading game data - handled silently
+        }
       }
     }
     
     if (!gameData) {
-      alert(`Game tidak ditemukan! AppID: ${appidNum}\n\nPastikan game ada di fix_games.json.`);
+      alert(`Game tidak ditemukan! AppID: ${appidNum}`);
       navigate('fix-games');
       return;
     }
     
     currentFixGame = gameData;
-    renderFixGameDetail(gameData);
+    
+    // Render based on category
+    if (isSteamAccount) {
+      renderSteamAccountDetail(gameData);
+    } else {
+      renderFixGameDetail(gameData);
+    }
   } catch (e) {
-    console.error('initFixGameDetailPage error:', e);
     alert('Gagal memuat detail game!');
     navigate('fix-games');
   }
@@ -154,9 +198,7 @@ async function startFixGameProcess() {
     try {
       await checkAntivirus();
     } catch (e) {
-      // Log error but continue - antivirus check is not critical
-      console.warn('[FixGames] Antivirus check error (non-fatal):', e);
-      // Continue to next step
+      // Antivirus check error (non-fatal) - continue to next step
     }
     
     // Step 2: Detect Path (background)
@@ -188,9 +230,6 @@ async function startFixGameProcess() {
     updateProgress(30, 'Menambahkan ke exclusion list...');
     try {
       const excludeResult = await autoExcludePath(gamePath);
-      
-      // Log untuk debugging
-      console.log('[FixGames] AutoExclude result received:', excludeResult);
       
       // PERBAIKAN: Cek needsAdmin bahkan jika success = false atau undefined
       // Check needsAdmin flag (bisa boolean atau string)
@@ -271,7 +310,7 @@ async function startFixGameProcess() {
     
     // Step 5: Extract (background)
     updateProgress(70, 'Mengekstrak file...');
-    const extractResult = await extractFiles(downloadResult.downloadPath, downloadResult.files, currentFixGame.password, (percent) => {
+    const extractResult = await extractFiles(downloadResult.downloadPath, downloadResult.files, currentFixGame.password, gamePath, (percent) => {
       // Update progress: 70% - 85% untuk extract
       const extractProgress = 70 + (percent * 0.15);
       updateProgress(extractProgress, `Mengekstrak file... ${Math.round(percent)}%`);
@@ -285,6 +324,14 @@ async function startFixGameProcess() {
       updateProgress(replaceProgress, `Mengganti file... ${Math.round(percent)}%`);
     });
     
+    // Step 7: Cleanup temporary files (download and extracted)
+    updateProgress(98, 'Membersihkan file temporary...');
+    try {
+      await cleanupTempFiles(downloadResult.downloadPath, extractResult.extractedPath);
+    } catch (e) {
+      // Non-fatal error - continue
+    }
+    
     // Success
     updateProgress(100, 'Selesai!');
     setTimeout(() => {
@@ -293,9 +340,7 @@ async function startFixGameProcess() {
     }, 500);
     
   } catch (e) {
-    console.error('Fix process error:', e);
-    // Hapus popup error - hanya log ke console
-    // showErrorMessage(e.message || 'Terjadi kesalahan saat proses fix!');
+    // Error handled by UI
     resetButtonState();
   }
 }
@@ -386,9 +431,6 @@ async function autoExcludePath(gamePath) {
             clearTimeout(timeout);
             window.desktopBridge.offMessage(handler);
             
-            // Log untuk debugging
-            console.log('[FixGames] AutoExclude result:', msg);
-            
             // Return result object (bukan throw) agar caller bisa handle needsAdmin
             resolve(msg);
           }
@@ -421,15 +463,8 @@ async function detectGamePath() {
             // data is already the parsed object from WebView2 message
             const msg = typeof data === 'string' ? JSON.parse(data) : data;
             
-            // Debug logging - log ALL messages to see what we're receiving
-            console.log('[FixGames] Handler received:', typeof data, data);
-            if (msg && msg.type) {
-              console.log('[FixGames] Message type:', msg.type, 'full data:', JSON.stringify(msg));
-            }
-            
             // Check if this is the response we're waiting for
             if (msg && msg.type === 'FixGamesDetectPath') {
-              console.log('[FixGames] FixGamesDetectPath response received!', msg);
               clearTimeout(timeout);
               window.desktopBridge.offMessage(handler);
               
@@ -440,11 +475,9 @@ async function detectGamePath() {
                 
                 openManualPathModal(baseMessage)
                   .then((manualPath) => {
-                    console.log('[FixGames] Manual path selected:', manualPath);
                     resolve(manualPath);
                   })
                   .catch((err) => {
-                    console.warn('[FixGames] Manual path selection cancelled or failed:', err);
                     reject(err instanceof Error ? err : new Error(String(err || baseMessage)));
                   });
                 return;
@@ -456,17 +489,12 @@ async function detectGamePath() {
               }
 
               if (msg.path) {
-                console.log('[FixGames] Path found:', msg.path);
                 resolve(msg.path);
               } else {
                 reject(new Error('Path tidak ditemukan dalam response'));
               }
-            } else {
-              console.log('[FixGames] Ignoring message type:', msg?.type || 'unknown');
             }
           } catch (e) {
-            // Log all errors for debugging
-            console.error('[FixGames] Error in handler:', e, 'data type:', typeof data, 'data:', data);
             // Don't reject here - let timeout handle it if message is wrong type
           }
         };
@@ -476,7 +504,6 @@ async function detectGamePath() {
         
         // Send request
         try {
-          console.log('[FixGames] Sending FixGamesDetectPath request for appid:', currentAppId);
           window.desktopBridge.send('FixGamesDetectPath', {
             appid: currentAppId,
             gameTitle: currentFixGame?.title || ''
@@ -672,7 +699,7 @@ async function downloadFixFiles(progressCallback) {
 }
 
 // Step 5: Extract Files (background)
-async function extractFiles(downloadPath, files, password, progressCallback) {
+async function extractFiles(downloadPath, files, password, gamePath, progressCallback) {
   try {
     if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
       return new Promise((resolve, reject) => {
@@ -700,7 +727,8 @@ async function extractFiles(downloadPath, files, password, progressCallback) {
         window.desktopBridge.send('FixGamesExtract', {
           downloadPath,
           files,
-          password
+          password,
+          gamePath: gamePath || null
         });
       });
     } else {
@@ -760,6 +788,45 @@ async function replaceFiles(gamePath, extractedPath, progressCallback) {
   }
 }
 
+// Step 7: Cleanup Temporary Files (background)
+async function cleanupTempFiles(downloadPath, extractedPath) {
+  try {
+    if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          // Non-fatal - resolve anyway
+          resolve({ success: true, timeout: true });
+        }, 30000); // 30 seconds timeout
+
+        const handler = (msg) => {
+          if (msg.type === 'FixGamesCleanupComplete') {
+            clearTimeout(timeout);
+            window.desktopBridge.offMessage(handler);
+            resolve(msg);
+          } else if (msg.type === 'FixGamesCleanupError') {
+            clearTimeout(timeout);
+            window.desktopBridge.offMessage(handler);
+            // Non-fatal - resolve anyway
+            resolve(msg);
+          }
+        };
+
+        window.desktopBridge.onMessage(handler);
+        window.desktopBridge.send('FixGamesCleanup', {
+          downloadPath: downloadPath || '',
+          extractedPath: extractedPath || ''
+        });
+      });
+    } else {
+      // Fallback untuk testing
+      return { success: true };
+    }
+  } catch (e) {
+    // Non-fatal - return success anyway
+    return { success: true };
+  }
+}
+
 // Show success message
 function showSuccessMessage() {
   // Simple alert for now, bisa diganti dengan modal yang lebih elegan
@@ -770,6 +837,206 @@ function showSuccessMessage() {
 function showErrorMessage(message) {
   alert('❌ Error: ' + message);
 }
+
+// Render Steam Account detail (special layout)
+function renderSteamAccountDetail(game) {
+  // Hide important info section
+  const importantInfo = document.getElementById('fix-important-info');
+  if (importantInfo) {
+    importantInfo.style.display = 'none';
+  }
+  
+  // Hide action button section
+  const actionSection = document.getElementById('fix-action-button');
+  if (actionSection) {
+    actionSection.style.display = 'none';
+  }
+  
+  // Hide progress container
+  const progressContainer = document.getElementById('fix-progress-container');
+  if (progressContainer) {
+    progressContainer.style.display = 'none';
+  }
+  
+  // Update poster
+  const poster = document.getElementById('fix-detail-poster');
+  if (poster) {
+    poster.src = game.poster || '';
+    poster.alt = game.title || '';
+  }
+  
+  // Update title
+  const title = document.getElementById('fix-detail-title');
+  if (title) {
+    title.textContent = game.title || 'Unknown';
+  }
+  
+  // Update premium badge
+  const premiumBadge = document.getElementById('fix-detail-premium-badge');
+  if (premiumBadge) {
+    const isPremium = game.premium === true;
+    if (isPremium) {
+      premiumBadge.textContent = 'PREMIUM';
+      premiumBadge.className = 'bg-yellow-500 text-black text-xs px-3 py-1 rounded font-semibold';
+      premiumBadge.classList.remove('hidden');
+    } else {
+      premiumBadge.textContent = 'STANDARD';
+      premiumBadge.className = 'bg-gray-600 text-white text-xs px-3 py-1 rounded font-semibold';
+      premiumBadge.classList.remove('hidden');
+    }
+  }
+  
+  // Update publisher
+  const publisher = document.getElementById('fix-detail-publisher');
+  if (publisher) {
+    publisher.textContent = game.publisher || '';
+  }
+  
+  // Update AppID
+  const appid = document.getElementById('fix-detail-appid');
+  if (appid) {
+    appid.textContent = `AppID: ${game.appid}`;
+  }
+  
+  // Create account info section
+  const infoContainer = document.querySelector('.flex-1.space-y-6');
+  if (infoContainer) {
+    // Remove existing important info and action button sections
+    const existingImportant = infoContainer.querySelector('.space-y-3');
+    if (existingImportant) {
+      existingImportant.remove();
+    }
+    const existingAction = infoContainer.querySelector('.pt-4.border-t');
+    if (existingAction) {
+      existingAction.remove();
+    }
+    
+    // Add account info section
+    const accountSection = document.createElement('div');
+    accountSection.className = 'space-y-4';
+    accountSection.innerHTML = `
+      <div>
+        <h3 class="text-lg font-semibold mb-3">Account</h3>
+        <div class="space-y-3">
+          <div class="bg-[#1a1a1a] border border-white/5 rounded-lg p-4">
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <p class="text-xs text-gray-400 mb-1">Username</p>
+                <p id="steam-account-username" class="text-white font-mono text-sm">${escapeHtml(game.username || '')}</p>
+              </div>
+              <button onclick="copyToClipboard('steam-account-username')" 
+                      class="ml-4 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition">
+                Copy
+              </button>
+            </div>
+          </div>
+          <div class="bg-[#1a1a1a] border border-white/5 rounded-lg p-4">
+            <div class="flex items-center justify-between">
+              <div class="flex-1">
+                <p class="text-xs text-gray-400 mb-1">Password</p>
+                <p id="steam-account-password" class="text-white font-mono text-sm">${escapeHtml(game.password || '')}</p>
+              </div>
+              <button onclick="copyToClipboard('steam-account-password')" 
+                      class="ml-4 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition">
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div>
+        <h3 class="text-lg font-semibold mb-3">Instruksi Penggunaan</h3>
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-4">
+          <p class="text-gray-300 text-sm leading-relaxed">
+            Jika akun tidak berhasil login harap segera hubungi admin!!
+          </p>
+        </div>
+        <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-4 mb-4">
+          <p class="text-green-400 font-semibold mb-3">Jika berhasil Login ikuti instruksi dibawah ini:</p>
+          <ol class="text-gray-300 text-sm space-y-2.5 list-decimal list-inside leading-relaxed">
+            <li>Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</li>
+            <li>Cek apakah ada game yang sesuai di library akun tersebut.</li>
+            <li>Jika ada game, logout dan kembali ke akun pribadi kalian.</li>
+            <li>Add game tersebut ke library akun pribadi kalian terlebih dahulu.</li>
+            <li>Download game seperti biasa di akun pribadi kalian.</li>
+            <li>Setelah download selesai, login kembali ke akun Steam tersebut.</li>
+            <li class="font-bold text-yellow-400 text-base mt-3 mb-3 bg-yellow-500/20 px-3 py-2 rounded border border-yellow-500/40">
+              ⚠️ PENTING: Setelah login, pastikan Steam kalian dalam mode <span class="bg-yellow-500/30 px-2 py-1 rounded font-bold">OFFLINE MODE (WAJIB!!!)</span>
+            </li>
+            <li>Jalankan game dari akun tersebut.</li>
+            <li>Biarkan game berjalan sampai masuk ke menu utama game.</li>
+            <li>Setelah masuk menu utama, tutup game dengan menekan <span class="font-mono bg-white/10 px-2 py-0.5 rounded">Alt + F4</span>.</li>
+            <li>Logout dari akun tersebut dan kembali ke akun pribadi kalian.</li>
+            <li>Mainkan game dari akun pribadi kalian seperti biasa.</li>
+          </ol>
+        </div>
+      </div>
+    `;
+    
+    infoContainer.appendChild(accountSection);
+  }
+}
+
+// Copy to clipboard helper
+function copyToClipboard(elementId) {
+  const element = document.getElementById(elementId);
+  if (!element) return;
+  
+  const text = element.textContent.trim();
+  if (!text) return;
+  
+  // Use Clipboard API if available
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showCopySuccess(elementId);
+    }).catch(() => {
+      // Fallback to old method
+      fallbackCopyToClipboard(text, elementId);
+    });
+  } else {
+    // Fallback to old method
+    fallbackCopyToClipboard(text, elementId);
+  }
+}
+
+function fallbackCopyToClipboard(text, elementId) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-999999px';
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  
+  try {
+    document.execCommand('copy');
+    showCopySuccess(elementId);
+  } catch (err) {
+    // Copy failed
+  }
+  
+  document.body.removeChild(textArea);
+}
+
+function showCopySuccess(elementId) {
+  const button = document.querySelector(`button[onclick="copyToClipboard('${elementId}')"]`);
+  if (button) {
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    button.classList.add('bg-green-600', 'hover:bg-green-700');
+    button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+    
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.classList.remove('bg-green-600', 'hover:bg-green-700');
+      button.classList.add('bg-blue-600', 'hover:bg-blue-700');
+    }, 2000);
+  }
+}
+
+// Expose copyToClipboard globally
+window.copyToClipboard = copyToClipboard;
 
 // Escape HTML helper
 function escapeHtml(str) {
@@ -782,8 +1049,291 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// Add Shortcut Process
+async function startAddShortcutProcess() {
+  if (!currentFixGame) {
+    alert('Game data tidak tersedia!');
+    return;
+  }
+  
+  const addShortcutBtn = document.getElementById('fix-game-add-shortcut-btn');
+  const btnText = document.getElementById('fix-shortcut-btn-text');
+  const btnSpinner = document.getElementById('fix-shortcut-btn-spinner');
+  
+  // Update button state
+  if (addShortcutBtn) addShortcutBtn.disabled = true;
+  if (btnText) btnText.textContent = 'Mencari game...';
+  if (btnSpinner) btnSpinner.classList.remove('hidden');
+  
+  try {
+    // Step 1: Detect Path (sama seperti startFixGameProcess)
+    let gamePath;
+    try {
+      gamePath = await detectGamePath();
+    } catch (e) {
+      // Error sudah memiliki pesan yang jelas dari detectGamePath
+      throw e;
+    }
+    
+    if (!gamePath) {
+      // Game belum terinstall → buka modal manual path selection
+      const manualPath = await new Promise((resolve, reject) => {
+        openManualPathModal('Game mungkin belum Anda install atau tidak ditemukan di Steam library. Silakan cari folder game secara manual atau pastikan game sudah terinstall di Steam.')
+          .then(resolve)
+          .catch(reject);
+      });
+      if (!manualPath) {
+        throw new Error('Anda belum memilih folder game.');
+      }
+      gamePath = manualPath;
+    }
+    
+    // Step 2: Scan executables
+    if (btnText) btnText.textContent = 'Memindai executable...';
+    
+    const gameName = currentFixGame.title || 'Game';
+    const executables = await scanGameExecutables(gamePath, gameName);
+    
+    if (!executables || executables.length === 0) {
+      alert('Tidak ada executable (.exe) ditemukan di folder game ini.');
+      return;
+    }
+    
+    // Step 3: Show dialog untuk user pilih executable
+    const selectedExe = await showExecutableSelectionDialog(executables, gameName);
+    
+    if (!selectedExe) {
+      // User cancel
+      return;
+    }
+    
+    // Step 4: Create desktop shortcut
+    if (btnText) btnText.textContent = 'Membuat shortcut...';
+    
+    const shortcutName = `${gameName} - FIX`;
+    
+    const result = await createDesktopShortcut(selectedExe.path, shortcutName, gamePath);
+    
+    if (result && result.success) {
+      if (typeof premiumAlert === 'function') {
+        await premiumAlert(
+          `Shortcut berhasil dibuat di Desktop!\n\nNama: ${shortcutName}\n\nAnda dapat menambahkan shortcut ini ke Steam library secara manual melalui:\nSteam → Games → Add a Non-Steam Game to My Library`,
+          'Shortcut Berhasil Dibuat'
+        );
+      } else {
+        alert(`Shortcut berhasil dibuat di Desktop!\n\nNama: ${shortcutName}\n\nAnda dapat menambahkan shortcut ini ke Steam library secara manual.`);
+      }
+    } else {
+      throw new Error(result?.error || 'Gagal membuat shortcut');
+    }
+  } catch (e) {
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert('Gagal membuat shortcut: ' + (e.message || 'Unknown error'), 'Error');
+    } else {
+      alert('Gagal membuat shortcut: ' + (e.message || 'Unknown error'));
+    }
+  } finally {
+    // Reset button state
+    if (addShortcutBtn) addShortcutBtn.disabled = false;
+    if (btnText) btnText.textContent = '📌 Add Shortcut';
+    if (btnSpinner) btnSpinner.classList.add('hidden');
+  }
+}
+
+// Scan executables in game folder
+async function scanGameExecutables(gamePath, gameTitle) {
+  return new Promise((resolve, reject) => {
+    if (!window.desktopBridge || typeof window.desktopBridge.send !== 'function') {
+      reject(new Error('Desktop bridge tidak tersedia'));
+      return;
+    }
+    
+    const timeout = setTimeout(() => {
+      window.desktopBridge.offMessage(handler);
+      reject(new Error('Timeout: Gagal memindai executable'));
+    }, 30000); // 30 seconds timeout
+    
+    const handler = (data) => {
+      try {
+        const msg = typeof data === 'string' ? JSON.parse(data) : data;
+        
+        if (msg && msg.type === 'FixGamesScanExecutables') {
+          clearTimeout(timeout);
+          window.desktopBridge.offMessage(handler);
+          
+          if (!msg.success) {
+            reject(new Error(msg.error || 'Gagal memindai executable'));
+            return;
+          }
+          
+          resolve(msg.executables || []);
+        }
+      } catch (e) {
+        // Don't reject here - let timeout handle it
+      }
+    };
+    
+    window.desktopBridge.onMessage(handler);
+    
+    try {
+      window.desktopBridge.send('FixGamesScanExecutables', {
+        gamePath: gamePath,
+        gameTitle: gameTitle || ''
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      window.desktopBridge.offMessage(handler);
+      reject(new Error('Gagal mengirim request: ' + e.message));
+    }
+  });
+}
+
+// Show dialog untuk user pilih executable
+async function showExecutableSelectionDialog(executables, gameName) {
+  return new Promise((resolve) => {
+    // Find recommended exe (highest similarity or score)
+    const recommended = executables.find(exe => exe.recommended === true) || executables[0];
+    const recommendedName = recommended ? recommended.name : '';
+    
+    // Create modal HTML
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60';
+    modal.innerHTML = `
+      <div class="bg-[#151515] border border-white/10 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col">
+        <div class="p-6 border-b border-white/5">
+          <h3 class="text-xl font-semibold text-white">Pilih Executable</h3>
+          <p class="text-sm text-gray-400 mt-1">Pilih executable yang ingin dibuat shortcut untuk ${escapeHtml(gameName)}</p>
+          ${recommendedName ? `<p class="text-xs text-blue-400 mt-2">💡 Launcher yang paling cocok kemungkinan <span class="font-mono font-semibold">${escapeHtml(recommendedName)}</span></p>` : ''}
+        </div>
+        <div class="flex-1 overflow-y-auto p-6">
+          <div class="space-y-2" id="exe-list-container">
+            ${executables.map((exe, index) => `
+              <label class="block cursor-pointer">
+                <div class="bg-[#1a1a1a] border ${exe.recommended ? 'border-green-500/50 bg-green-500/5' : 'border-white/5'} rounded-lg p-4 hover:bg-white/5 transition">
+                  <div class="flex items-start gap-3">
+                    <input type="radio" name="exe-selection" value="${index}" class="mt-1">
+                    ${exe.iconBase64 ? `<img src="data:image/png;base64,${exe.iconBase64}" alt="${escapeHtml(exe.name)}" class="w-8 h-8 flex-shrink-0 object-contain" />` : '<div class="w-8 h-8 flex-shrink-0 bg-gray-700 rounded flex items-center justify-center"><span class="text-xs text-gray-400">.exe</span></div>'}
+                    <div class="flex-1">
+                      <div class="flex items-center gap-2 mb-1">
+                        <span class="font-mono text-sm text-white">${escapeHtml(exe.name)}</span>
+                        ${exe.recommended ? '<span class="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">Direkomendasikan</span>' : ''}
+                      </div>
+                      <div class="text-xs text-gray-400">
+                        <div>Lokasi: <span class="font-mono text-gray-300">${escapeHtml(exe.relativePath || exe.path)}</span></div>
+                        ${exe.size ? `<div>Ukuran: ${formatFileSize(exe.size)}</div>` : ''}
+                        ${exe.similarityScore !== undefined ? `<div>Kemiripan dengan nama game: ${exe.similarityScore}%</div>` : ''}
+                        ${exe.score !== undefined ? `<div>Skor: ${exe.score}/100</div>` : ''}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <div class="p-6 border-t border-white/5 flex gap-3 justify-end">
+          <button onclick="this.closest('.fixed').remove(); window._exeSelectionResolve(null);" 
+                  class="px-5 py-2.5 rounded-lg border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition">
+            Batal
+          </button>
+          <button id="exe-create-shortcut-btn" onclick="const selected = document.querySelector('input[name=exe-selection]:checked'); if (selected) { const index = parseInt(selected.value); window._exeSelectionResolve(window._exeSelectionList[index]); this.closest('.fixed').remove(); } else { alert('Silakan pilih executable terlebih dahulu!'); }" 
+                  class="px-5 py-2.5 rounded-lg bg-gradient-to-r from-green-500 to-green-600 text-sm font-semibold text-white shadow-lg hover:from-green-400 hover:to-green-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled>
+            Buat Shortcut
+          </button>
+        </div>
+      </div>
+    `;
+    
+    // Store executables and resolve function globally for onclick handlers
+    window._exeSelectionList = executables;
+    window._exeSelectionResolve = resolve;
+    
+    document.body.appendChild(modal);
+    
+    // Enable/disable button based on selection
+    const createBtn = modal.querySelector('#exe-create-shortcut-btn');
+    const radioButtons = modal.querySelectorAll('input[name="exe-selection"]');
+    
+    radioButtons.forEach(radio => {
+      radio.addEventListener('change', () => {
+        if (createBtn) {
+          createBtn.disabled = !document.querySelector('input[name="exe-selection"]:checked');
+        }
+      });
+    });
+    
+    // Close on outside click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Format file size helper
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
+// Create desktop shortcut
+async function createDesktopShortcut(exePath, shortcutName, gamePath) {
+  return new Promise((resolve, reject) => {
+    if (!window.desktopBridge || typeof window.desktopBridge.send !== 'function') {
+      reject(new Error('Desktop bridge tidak tersedia'));
+      return;
+    }
+    
+    const timeout = setTimeout(() => {
+      window.desktopBridge.offMessage(handler);
+      reject(new Error('Timeout: Gagal membuat shortcut'));
+    }, 30000);
+    
+    const handler = (data) => {
+      try {
+        const msg = typeof data === 'string' ? JSON.parse(data) : data;
+        
+        if (msg && msg.type === 'FixGamesCreateShortcut') {
+          clearTimeout(timeout);
+          window.desktopBridge.offMessage(handler);
+          
+          if (!msg.success) {
+            reject(new Error(msg.error || 'Gagal membuat shortcut'));
+            return;
+          }
+          
+          resolve(msg);
+        }
+      } catch (e) {
+        // Don't reject here
+      }
+    };
+    
+    window.desktopBridge.onMessage(handler);
+    
+    try {
+      window.desktopBridge.send('FixGamesCreateShortcut', {
+        exePath: exePath,
+        shortcutName: shortcutName,
+        gamePath: gamePath
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      window.desktopBridge.offMessage(handler);
+      reject(new Error('Gagal mengirim request: ' + e.message));
+    }
+  });
+}
+
 // Expose globally
 window.initFixGameDetailPage = initFixGameDetailPage;
 window.startFixGameProcess = startFixGameProcess;
+window.startAddShortcutProcess = startAddShortcutProcess;
 window.onFixPathChooseManual = onFixPathChooseManual;
 window.onFixPathCancel = onFixPathCancel;

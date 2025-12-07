@@ -3,12 +3,26 @@
   <div class="flex items-center justify-between">
     <h1 class="text-3xl font-bold">Fix Games</h1>
     
-    <!-- SEARCH BAR -->
-    <div class="flex items-center gap-2">
+    <!-- SEARCH BAR & FILTERS -->
+    <div class="flex items-center gap-3">
       <input id="fix-games-search" 
         oninput="handleFixGamesSearch(event)"
         class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 text-sm w-64 focus:outline-none focus:border-blue-500/50 transition"
         placeholder="Cari game..." />
+      
+      <!-- PREMIUM/STANDARD FILTERS -->
+      <div class="flex items-center gap-2">
+        <button id="fix-filter-standard" 
+          onclick="toggleFixGamesFilter('standard')"
+          class="px-3 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition active-filter">
+          Standard
+        </button>
+        <button id="fix-filter-premium" 
+          onclick="toggleFixGamesFilter('premium')"
+          class="px-3 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition active-filter">
+          Premium
+        </button>
+      </div>
     </div>
   </div>
 
@@ -43,6 +57,11 @@
       id="fix-category-other"
       class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
       Other
+    </button>
+    <button onclick="filterFixGamesByCategory('steam-account')" 
+      id="fix-category-steam-account"
+      class="px-4 py-2 rounded-lg bg-[#151515] border border-white/5 hover:bg-white/5 text-sm font-medium transition whitespace-nowrap">
+      Steam Account
     </button>
   </div>
 
@@ -117,6 +136,12 @@
     font-size: 11px;
     color: rgba(255, 255, 255, 0.6);
     margin-top: 4px;
+  }
+
+  .active-filter {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+    border-color: #3b82f6 !important;
+    color: white !important;
   }
 </style>
 

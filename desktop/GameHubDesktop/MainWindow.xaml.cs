@@ -14,6 +14,7 @@ namespace GameHubDesktop
         private readonly Services.OnlineFixService _onlineFix = new Services.OnlineFixService();
         private readonly Services.AppLogService _appLog = new Services.AppLogService();
         private readonly Services.FixGamesService _fixGames = new Services.FixGamesService();
+        private readonly Services.UpdateService _updateService = new Services.UpdateService();
         private bool _logSubscribed = false;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _appliedCache = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
 
@@ -43,10 +44,13 @@ namespace GameHubDesktop
                 Services.OverrideDataService.Log = (msg) => _appLog.Append(msg);
                 Services.FixGamesDataService.Initialize();
                 Services.FixGamesDataService.Log = (msg) => _appLog.Append(msg);
+                Services.SteamGamesDataService.Initialize();
+                Services.SteamGamesDataService.Log = (msg) => _appLog.Append(msg);
                 _onlineFix.Log = (msg) => _appLog.Append(msg);
                 Services.AddGameService.Log = (msg) => _appLog.Append(msg);
                 Services.SteamService.Log = (msg) => _appLog.Append(msg);
                 _fixGames.Log = (msg) => _appLog.Append(msg);
+                _updateService.Log = (msg) => _appLog.Append(msg);
                 var env = await CoreWebView2Environment.CreateAsync();
                 await WebView.EnsureCoreWebView2Async(env);
 
@@ -544,6 +548,33 @@ namespace GameHubDesktop
                         }
                         break;
                     }
+                    case "GetSteamGamesData":
+                    {
+                        try
+                        {
+                            _appLog.Append("GetSteamGamesData requested");
+                            var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
+                            var data = await Services.SteamGamesDataService.GetSteamGamesDataAsync(forceRefresh, (percent, message) =>
+                            {
+                                try
+                                {
+                                    SendToJs(new { type = "SteamGamesDataProgress", percent, message });
+                                }
+                                catch (Exception ex)
+                                {
+                                    _appLog.Append($"[GetSteamGamesData] Progress error: {ex.Message}");
+                                }
+                            });
+                            _appLog.Append($"GetSteamGamesData completed, data: {(data != null ? "not null" : "null")}");
+                            SendToJs(new { type = "SteamGamesData", data = data });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetSteamGamesData error: {ex.Message}");
+                            SendToJs(new { type = "SteamGamesData", data = (object?)null, error = ex.Message });
+                        }
+                        break;
+                    }
                     case "GetFixGamesData":
                     {
                         try
@@ -742,6 +773,126 @@ namespace GameHubDesktop
                                 errorMessage = ex.Message
                             });
                         }
+                        break;
+                    }
+                    case "GetUpdateState":
+                    {
+                        var snapshot = _updateService.GetStateSnapshot();
+                        SendToJs(new
+                        {
+                            type = "UpdateState",
+                            lastCheckedUtc = snapshot.LastCheckedUtc,
+                            lastKnownRemoteVersion = snapshot.LastKnownRemoteVersion,
+                            lastDownloadedInstallerPath = snapshot.LastDownloadedInstallerPath,
+                            lastPromptUtc = snapshot.LastPromptUtc
+                        });
+                        break;
+                    }
+                    case "CheckForUpdates":
+                    {
+                        var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var result = await _updateService.CheckForUpdatesAsync(forceRefresh).ConfigureAwait(false);
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateCheckResult",
+                                        success = result.Success,
+                                        updateAvailable = result.UpdateAvailable,
+                                        currentVersion = result.CurrentVersion,
+                                        latestVersion = result.LatestMetadata?.Version,
+                                        metadata = result.LatestMetadata,
+                                        checkedAtUtc = result.CheckedAtUtc,
+                                        error = result.Error
+                                    });
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateCheckResult",
+                                        success = false,
+                                        error = ex.Message
+                                    });
+                                });
+                            }
+                        });
+                        break;
+                    }
+                    case "DownloadUpdateInstaller":
+                    {
+                        if (!msg.payload.TryGetProperty("metadata", out var metadataElement) || metadataElement.ValueKind == JsonValueKind.Undefined || metadataElement.ValueKind == JsonValueKind.Null)
+                        {
+                            SendToJs(new { type = "UpdateDownloadComplete", success = false, error = "Metadata update tidak tersedia" });
+                            break;
+                        }
+
+                        Services.UpdateMetadata? metadata = null;
+                        try
+                        {
+                            metadata = JsonSerializer.Deserialize<Services.UpdateMetadata>(metadataElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"DownloadUpdateInstaller metadata parse error: {ex.Message}");
+                        }
+
+                        if (metadata == null)
+                        {
+                            SendToJs(new { type = "UpdateDownloadComplete", success = false, error = "Metadata update tidak valid" });
+                            break;
+                        }
+
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var result = await _updateService.DownloadInstallerAsync(metadata, async progress =>
+                                {
+                                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                    {
+                                        SendToJs(new
+                                        {
+                                            type = "UpdateDownloadProgress",
+                                            percent = progress.Percent,
+                                            bytesReceived = progress.BytesReceived,
+                                            totalBytes = progress.TotalBytes
+                                        });
+                                    });
+                                }).ConfigureAwait(false);
+
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateDownloadComplete",
+                                        success = result.Success,
+                                        error = result.Error,
+                                        installerPath = result.InstallerPath,
+                                        metadata = result.Metadata
+                                    });
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                                {
+                                    SendToJs(new
+                                    {
+                                        type = "UpdateDownloadComplete",
+                                        success = false,
+                                        error = ex.Message
+                                    });
+                                });
+                            }
+                        });
                         break;
                     }
                     case "FixGamesCheckAntivirus":
@@ -1039,6 +1190,41 @@ namespace GameHubDesktop
                         {
                             _fixGames.Cancel(appid);
                         }
+                        break;
+                    }
+                    case "FixGamesScanExecutables":
+                    {
+                        var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : string.Empty;
+                        var gameTitle = msg.payload.TryGetProperty("gameTitle", out var gt) ? gt.GetString() : null;
+                        if (string.IsNullOrWhiteSpace(gamePath))
+                        {
+                            SendToJs(new { type = "FixGamesScanExecutables", success = false, error = "Game path tidak valid" });
+                            break;
+                        }
+                        _ = Task.Run(async () =>
+                        {
+                            var result = await _fixGames.ScanExecutablesAsync(gamePath, gameTitle);
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
+                        break;
+                    }
+                    case "FixGamesCreateShortcut":
+                    {
+                        var exePath = msg.payload.TryGetProperty("exePath", out var ep) ? ep.GetString() : string.Empty;
+                        var shortcutName = msg.payload.TryGetProperty("shortcutName", out var sn) ? sn.GetString() : string.Empty;
+                        var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : string.Empty;
+                        
+                        if (string.IsNullOrWhiteSpace(exePath))
+                        {
+                            SendToJs(new { type = "FixGamesCreateShortcut", success = false, error = "Executable path tidak valid" });
+                            break;
+                        }
+                        
+                        _ = Task.Run(async () =>
+                        {
+                            var result = await _fixGames.CreateDesktopShortcutAsync(exePath, shortcutName ?? "", gamePath ?? "");
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
+                        });
                         break;
                     }
                     case "ActivateLicense":
