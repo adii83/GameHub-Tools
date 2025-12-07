@@ -634,8 +634,8 @@
         
         // Untuk kategori steam-account, cek premium status
         if (isSteamAccount) {
-          // Jika game premium: false dan license standard, block
-          if (game && game.premium === false && licenseInfo.plan === 'standard') {
+          // Jika game premium dan license masih standard, block akses Steam Account
+          if (game && game.premium === true && licenseInfo.plan === 'standard') {
             if (typeof premiumAlert === 'function') {
               await premiumAlert(
                 'Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁',
