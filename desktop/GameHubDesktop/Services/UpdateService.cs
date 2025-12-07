@@ -126,6 +126,7 @@ namespace GameHubDesktop.Services
             }
 
             var uri = new Uri(metadata.DownloadUrl);
+            CleanupOldInstallers();
             var destinationPath = GetInstallerDestinationPath(metadata, uri);
 
             try
@@ -168,9 +169,14 @@ namespace GameHubDesktop.Services
                     }
                 }
 
+                await file.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await file.DisposeAsync().ConfigureAwait(false);
+                WaitUntilFileUnlocked(destinationPath);
+
                 // Verify hash if provided
                 if (!string.IsNullOrWhiteSpace(metadata.Sha256))
                 {
+                    WaitUntilFileUnlocked(destinationPath);
                     var hash = await ComputeSha256Async(destinationPath).ConfigureAwait(false);
                     if (!hash.Equals(metadata.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
@@ -184,6 +190,7 @@ namespace GameHubDesktop.Services
                 }
 
                 var state = LoadState();
+                WaitUntilFileUnlocked(destinationPath);
                 state.LastDownloadedInstallerPath = destinationPath;
                 SaveState(state);
 
@@ -515,6 +522,32 @@ namespace GameHubDesktop.Services
             }
         }
 
+        private void CleanupOldInstallers()
+        {
+            try
+            {
+                if (!Directory.Exists(_downloadDir)) return;
+                foreach (var old in Directory.GetFiles(_downloadDir, "GameHubSetup*.exe"))
+                {
+                    try
+                    {
+                        if (!IsFileLocked(old))
+                        {
+                            File.Delete(old);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore individual delete failures
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore cleanup failures
+            }
+        }
+
         private static bool IsFileLocked(string path)
         {
             if (!File.Exists(path)) return false;
@@ -530,6 +563,19 @@ namespace GameHubDesktop.Services
             catch (UnauthorizedAccessException)
             {
                 return true;
+            }
+        }
+
+        private static void WaitUntilFileUnlocked(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return;
+            for (int i = 0; i < 20; i++)
+            {
+                if (!IsFileLocked(path))
+                {
+                    return;
+                }
+                Thread.Sleep(150);
             }
         }
 
