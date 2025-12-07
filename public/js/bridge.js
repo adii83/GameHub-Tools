@@ -112,6 +112,45 @@
         api.send('DownloadUpdateInstaller', { metadata });
       });
     },
+    async installLatestUpdate(metadata, progressCallback = null) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('installLatestUpdate timeout'));
+        }, 900000); // 15 minutes
+
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            if (data?.type === 'UpdateInstallProgress') {
+              if (progressCallback) {
+                try { progressCallback(data); } catch (e) {}
+              }
+            } else if (data?.type === 'UpdateInstallComplete') {
+              cleanup();
+              resolve(data);
+            }
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        };
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          try { window.chrome.webview.removeEventListener('message', handler); } catch (e) {}
+        };
+
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('InstallLatestUpdate', { metadata });
+      });
+    },
     onMessage(handler) {
       if (!hasWebView) return;
       try {

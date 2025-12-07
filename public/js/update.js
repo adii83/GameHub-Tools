@@ -167,13 +167,16 @@ const UpdatePanel = (() => {
     lastCheckedUtc: null,
     currentVersion: null,
     latestVersion: null,
-    lastDownloadPath: null,
-    isChecking: false,
-    isDownloading: false,
-    progressPercent: 0,
-    progressLabel: '',
+    lastInstallerPath: null,
+    isInstalling: false,
+    installStage: null,
+    installPercent: null,
+    installLabel: '',
+    installMessage: '',
     lastError: null,
-    autoChecked: false
+    autoChecked: false,
+    snapshotHydrated: false,
+    promptedVersion: null
   };
 
   const elements = {
@@ -189,14 +192,19 @@ const UpdatePanel = (() => {
     progressBar: null,
     progressLabel: null,
     progressValue: null,
-    downloadInfo: null,
+    installInfo: null,
     checkButton: null,
-    downloadButton: null
+    installButton: null
   };
 
   function cacheElements() {
-    elements.card = document.getElementById('update-card');
-    if (!elements.card) return;
+    const card = document.getElementById('update-card');
+    if (!card) {
+      elements.card = null;
+      return false;
+    }
+
+    elements.card = card;
     elements.statusPill = document.getElementById('update-status-pill');
     elements.statusText = document.getElementById('update-status-text');
     elements.currentVersion = document.getElementById('update-current-version');
@@ -208,14 +216,22 @@ const UpdatePanel = (() => {
     elements.progressBar = document.getElementById('update-progress-bar');
     elements.progressLabel = document.getElementById('update-progress-label');
     elements.progressValue = document.getElementById('update-progress-value');
-    elements.downloadInfo = document.getElementById('update-download-info');
+    elements.installInfo = document.getElementById('update-install-info');
     elements.checkButton = document.getElementById('btn-check-update');
-    elements.downloadButton = document.getElementById('btn-download-update');
+    elements.installButton = document.getElementById('btn-install-update');
     captureButtonDefaults();
+    return true;
+  }
+
+  function ensureElements() {
+    if (elements.card && document.body.contains(elements.card)) {
+      return true;
+    }
+    return cacheElements();
   }
 
   function captureButtonDefaults() {
-    ['checkButton', 'downloadButton'].forEach((key) => {
+    ['checkButton', 'installButton'].forEach((key) => {
       const btn = elements[key];
       if (!btn) return;
       const labelSpan = btn.querySelector('span:last-child');
@@ -288,17 +304,17 @@ const UpdatePanel = (() => {
 
   function renderProgress() {
     if (!elements.progressWrapper || !elements.progressBar || !elements.progressLabel || !elements.progressValue) return;
-    if (state.isDownloading) {
+    if (state.isInstalling) {
       elements.progressWrapper.classList.remove('hidden');
-      const percent = typeof state.progressPercent === 'number' && state.progressPercent >= 0 ? Math.min(100, Math.max(0, state.progressPercent)) : null;
-      elements.progressBar.style.width = percent !== null ? `${percent}%` : '8%';
+      const percent = typeof state.installPercent === 'number' && state.installPercent >= 0 ? Math.min(100, Math.max(0, state.installPercent)) : null;
+      elements.progressBar.style.width = percent !== null ? `${percent}%` : '14%';
       elements.progressValue.textContent = percent !== null ? `${percent}%` : '...';
-      elements.progressLabel.textContent = state.progressLabel || 'Downloading update...';
+      elements.progressLabel.textContent = state.installLabel || 'Menyiapkan pembaruan...';
     } else {
       elements.progressWrapper.classList.add('hidden');
       elements.progressBar.style.width = '0%';
       elements.progressValue.textContent = '0%';
-      elements.progressLabel.textContent = 'Starting download...';
+      elements.progressLabel.textContent = 'Ready';
     }
   }
 
@@ -317,35 +333,36 @@ const UpdatePanel = (() => {
       }
     }
 
-    if (elements.downloadButton) {
-      const canDownload = !!(window.desktopBridge && typeof window.desktopBridge.downloadUpdate === 'function' && state.metadata && state.metadata.downloadUrl);
-      const label = elements.downloadButton.querySelector('span:last-child');
-      if (!canDownload) {
-        elements.downloadButton.disabled = true;
-        if (label) label.textContent = elements.downloadButton.dataset.defaultLabel || 'Download Installer';
-      } else if (state.isDownloading) {
-        elements.downloadButton.disabled = true;
-        if (label) label.textContent = 'Downloading...';
+    if (elements.installButton) {
+      const canInstall = !!(window.desktopBridge && typeof window.desktopBridge.installLatestUpdate === 'function' && state.metadata && state.metadata.downloadUrl && state.updateAvailable);
+      const label = elements.installButton.querySelector('span:last-child');
+      if (!canInstall) {
+        elements.installButton.disabled = true;
+        if (label) label.textContent = elements.installButton.dataset.defaultLabel || 'Install Update';
+      } else if (state.isInstalling) {
+        elements.installButton.disabled = true;
+        if (label) label.textContent = 'Installing...';
       } else {
-        elements.downloadButton.disabled = false;
-        if (label) label.textContent = elements.downloadButton.dataset.defaultLabel || 'Download Installer';
+        elements.installButton.disabled = false;
+        if (label) label.textContent = elements.installButton.dataset.defaultLabel || 'Install Update';
       }
     }
   }
 
-  function renderDownloadInfo() {
-    if (!elements.downloadInfo) return;
-    if (state.lastDownloadPath) {
-      elements.downloadInfo.textContent = `Last installer saved to ${state.lastDownloadPath}`;
-      elements.downloadInfo.classList.remove('hidden');
+  function renderInstallInfo() {
+    if (!elements.installInfo) return;
+    const infoText = state.installMessage || (state.lastInstallerPath ? `Installer terakhir: ${state.lastInstallerPath}` : '');
+    if (infoText) {
+      elements.installInfo.textContent = infoText;
+      elements.installInfo.classList.remove('hidden');
     } else {
-      elements.downloadInfo.classList.add('hidden');
-      elements.downloadInfo.textContent = '';
+      elements.installInfo.classList.add('hidden');
+      elements.installInfo.textContent = '';
     }
   }
 
   function render() {
-    if (!elements.card) return;
+    if (!ensureElements()) return;
     if (elements.currentVersion) {
       elements.currentVersion.textContent = formatVersion(state.currentVersion);
     }
@@ -364,7 +381,7 @@ const UpdatePanel = (() => {
     } else if (state.updateAvailable && state.metadata?.version) {
       setStatus('Update available', 'warning');
       if (elements.statusText) {
-        elements.statusText.textContent = `Versi ${formatVersion(state.metadata.version)} sudah tersedia. Klik "Download Installer" untuk mengambil file terbaru.`;
+        elements.statusText.textContent = `Versi ${formatVersion(state.metadata.version)} sudah tersedia. Klik "Install Update" untuk langsung memasang versi terbaru.`;
       }
     } else if (state.lastCheckedUtc) {
       setStatus('Up to date', 'success');
@@ -381,7 +398,7 @@ const UpdatePanel = (() => {
     renderReleaseNotes();
     renderProgress();
     renderButtons();
-    renderDownloadInfo();
+    renderInstallInfo();
   }
 
   async function hydrateSnapshot() {
@@ -394,7 +411,8 @@ const UpdatePanel = (() => {
       const snapshot = await window.desktopBridge.getUpdateState();
       state.lastCheckedUtc = snapshot?.lastCheckedUtc || null;
       state.latestVersion = snapshot?.lastKnownRemoteVersion || state.latestVersion;
-      state.lastDownloadPath = snapshot?.lastDownloadedInstallerPath || state.lastDownloadPath;
+      state.lastInstallerPath = snapshot?.lastDownloadedInstallerPath || state.lastInstallerPath;
+      state.snapshotHydrated = true;
       render();
     } catch (error) {
       state.lastError = error?.message || 'Gagal mengambil status update';
@@ -408,6 +426,9 @@ const UpdatePanel = (() => {
         premiumAlert('Bridge tidak tersedia', 'Error');
       }
       return;
+    }
+    if (!ensureElements()) {
+      mount();
     }
     state.isChecking = true;
     state.lastError = null;
@@ -428,12 +449,13 @@ const UpdatePanel = (() => {
         state.updateAvailable = !!(result.updateAvailable && state.metadata);
         state.lastCheckedUtc = result.checkedAtUtc || new Date().toISOString();
         state.lastError = null;
-        if (!silent && typeof premiumAlert === 'function') {
-          if (state.updateAvailable) {
-            premiumAlert('Versi baru tersedia! 🚀', 'Update ditemukan');
-          } else {
-            premiumAlert('GameHub sudah versi terbaru.', 'Up to date');
-          }
+        if (!state.updateAvailable) {
+          state.promptedVersion = null;
+        }
+        if (state.updateAvailable) {
+          maybePromptInstall(silent);
+        } else if (!silent && typeof premiumAlert === 'function') {
+          premiumAlert('GameHub sudah versi terbaru.', 'Up to date');
         }
       }
     } catch (error) {
@@ -448,58 +470,163 @@ const UpdatePanel = (() => {
     }
   }
 
-  async function downloadUpdate() {
-    if (!window.desktopBridge || typeof window.desktopBridge.downloadUpdate !== 'function') {
+  function updateInstallProgress(progress) {
+    if (!progress) return;
+    const stage = (progress.stage || '').toLowerCase();
+    if (stage === 'downloading') {
+      state.installStage = 'downloading';
+      state.installPercent = typeof progress.percent === 'number' ? progress.percent : null;
+      const received = formatBytes(progress.bytesReceived || 0);
+      const total = progress.totalBytes > 0 ? formatBytes(progress.totalBytes) : null;
+      state.installLabel = total ? `Mengunduh ${received} / ${total}` : `Mengunduh ${received}`;
+    } else if (stage === 'downloadcompleted') {
+      state.installStage = 'verifying';
+      state.installPercent = 100;
+      state.installLabel = 'Download selesai, menyiapkan installer...';
+    } else if (stage === 'installing') {
+      state.installStage = 'installing';
+      state.installPercent = null;
+      state.installLabel = 'Menjalankan installer...';
+    } else if (stage === 'completed') {
+      state.installStage = 'completed';
+      state.installPercent = progress.exitCode === 0 ? 100 : null;
+      state.installLabel = progress.exitCode === 0 ? 'Installer selesai' : `Installer selesai dengan kode ${progress.exitCode}`;
+    }
+
+    if (progress.message) {
+      state.installLabel = progress.message;
+    }
+    renderProgress();
+  }
+
+  function buildInstallPromptMessage() {
+    if (!state.metadata) return 'Update tersedia.';
+    const versionText = formatVersion(state.metadata.version || state.latestVersion);
+    const lines = [`Versi ${versionText} siap dipasang.`];
+    if (state.metadata.publishedAt) {
+      try {
+        const published = new Date(state.metadata.publishedAt);
+        if (!Number.isNaN(published.getTime())) {
+          lines.push(`Dirilis pada ${published.toLocaleString()}.`);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    if (Array.isArray(state.metadata.releaseNotes) && state.metadata.releaseNotes.length > 0) {
+      const notes = state.metadata.releaseNotes.map((note) => `• ${note}`);
+      lines.push('Catatan rilis:\n' + notes.join('\n'));
+    }
+    lines.push('GameHub akan mengunduh installer resmi dan menjalankannya secara otomatis. Simpan pekerjaan Anda sebelum melanjutkan.');
+    return lines.join('\n\n');
+  }
+
+  async function performInstall() {
+    if (!ensureElements()) {
+      mount();
+    }
+    if (!window.desktopBridge || typeof window.desktopBridge.installLatestUpdate !== 'function') {
       if (typeof premiumAlert === 'function') {
         premiumAlert('Bridge tidak tersedia', 'Error');
       }
-      return;
+      return null;
     }
     if (!state.metadata || !state.metadata.downloadUrl) {
       if (typeof premiumAlert === 'function') {
         premiumAlert('Metadata update belum tersedia. Cek update terlebih dahulu.', 'Info');
       }
-      return;
+      return null;
     }
-    state.isDownloading = true;
+
+    state.isInstalling = true;
     state.lastError = null;
-    state.progressPercent = 0;
-    state.progressLabel = '';
+    state.installStage = 'downloading';
+    state.installPercent = 0;
+    state.installLabel = 'Mengunduh pembaruan...';
+    state.installMessage = '';
     render();
+
     try {
-      const result = await window.desktopBridge.downloadUpdate(state.metadata, (progress) => {
-        if (!progress) return;
-        state.progressPercent = typeof progress.percent === 'number' ? progress.percent : null;
-        const received = formatBytes(progress.bytesReceived || 0);
-        const total = progress.totalBytes > 0 ? formatBytes(progress.totalBytes) : null;
-        state.progressLabel = total ? `${received} / ${total}` : `${received} downloaded`;
-        renderProgress();
+      const result = await window.desktopBridge.installLatestUpdate(state.metadata, (progress) => {
+        updateInstallProgress(progress);
       });
 
       if (!result || result.success === false) {
-        const errorMessage = result?.error || 'Download gagal';
+        const errorMessage = result?.error || 'Install gagal';
         state.lastError = errorMessage;
+        state.installMessage = '';
         if (typeof premiumAlert === 'function') {
-          premiumAlert(`Download gagal: ${errorMessage}`, 'Error');
+          premiumAlert(`Install gagal: ${errorMessage}`, 'Error');
         }
       } else {
-        state.lastDownloadPath = result.installerPath || state.lastDownloadPath;
+        state.lastInstallerPath = result.installerPath || state.lastInstallerPath;
+        state.installMessage = 'Update berhasil dipasang. Tutup dan buka ulang GameHub untuk memakai versi terbaru.';
         state.lastError = null;
         if (typeof premiumAlert === 'function') {
-          premiumAlert('Installer berhasil di-download. Jalankan file untuk meng-update GameHub.', 'Berhasil');
+          premiumAlert('Update berhasil dipasang! GameHub akan tetap berjalan hingga Anda menutupnya.', 'Berhasil');
         }
       }
+
+      return result;
     } catch (error) {
-      state.lastError = error?.message || 'Download gagal';
+      state.lastError = error?.message || 'Install gagal';
+      state.installMessage = '';
       if (typeof premiumAlert === 'function') {
-        premiumAlert(`Download gagal: ${state.lastError}`, 'Error');
+        premiumAlert(`Install gagal: ${state.lastError}`, 'Error');
       }
+      throw error;
     } finally {
-      state.isDownloading = false;
-      state.progressPercent = 0;
-      state.progressLabel = '';
+      state.isInstalling = false;
+      state.installStage = null;
+      state.installPercent = null;
+      state.installLabel = '';
       render();
     }
+  }
+
+  async function requestInstall({ skipConfirm = false, autoPrompt = false } = {}) {
+    if (!state.metadata || !state.updateAvailable) {
+      if (!autoPrompt && typeof premiumAlert === 'function') {
+        premiumAlert('Belum ada update yang bisa dipasang.', 'Info');
+      }
+      return false;
+    }
+    if (state.isInstalling) {
+      if (!autoPrompt && typeof premiumAlert === 'function') {
+        premiumAlert('Update sedang diproses. Tunggu hingga selesai.', 'Info');
+      }
+      return false;
+    }
+
+    if (!skipConfirm) {
+      const accepted = await premiumConfirm(buildInstallPromptMessage(), 'Update tersedia');
+      if (!accepted) {
+        return false;
+      }
+    }
+
+    try {
+      await performInstall();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function maybePromptInstall(silentMode) {
+    if (!state.updateAvailable || !state.metadata?.version) return;
+    if (silentMode) {
+      if (typeof showPremiumToast === 'function') {
+        showPremiumToast(`Versi ${formatVersion(state.metadata.version)} siap dipasang. Buka Settings untuk memasang.`, 0, 'info');
+      }
+      return;
+    }
+
+    if (state.promptedVersion === state.metadata.version) {
+      return;
+    }
+    state.promptedVersion = state.metadata.version;
+    requestInstall({ skipConfirm: false, autoPrompt: true });
   }
 
   function scheduleAutoCheck() {
@@ -510,19 +637,31 @@ const UpdatePanel = (() => {
     }, 800);
   }
 
-  function init() {
-    cacheElements();
-    if (!elements.card) return;
+  function mount() {
+    if (!ensureElements()) {
+      return false;
+    }
     render();
-    hydrateSnapshot().then(() => {
-      scheduleAutoCheck();
-    });
+    if (!state.snapshotHydrated) {
+      hydrateSnapshot().then(() => {
+        scheduleAutoCheck();
+      });
+    }
+    return true;
+  }
+
+  function init(retry = 0) {
+    if (mount()) return;
+    if (retry < 5) {
+      setTimeout(() => init(retry + 1), 200);
+    }
   }
 
   return {
     init,
+    mount,
     manualCheck: () => checkForUpdates({ forceRefresh: true, silent: false }),
-    download: () => downloadUpdate()
+    install: () => requestInstall({ skipConfirm: false })
   };
 })();
 
@@ -532,17 +671,19 @@ function handleCheckUpdate() {
   }
 }
 
-function handleDownloadUpdate() {
-  if (UpdatePanel && typeof UpdatePanel.download === 'function') {
-    UpdatePanel.download();
+function handleInstallUpdate() {
+  if (UpdatePanel && typeof UpdatePanel.install === 'function') {
+    UpdatePanel.install();
   }
 }
 
 window.handleCheckUpdate = handleCheckUpdate;
-window.handleDownloadUpdate = handleDownloadUpdate;
+window.handleInstallUpdate = handleInstallUpdate;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => UpdatePanel.init());
 } else {
   UpdatePanel.init();
 }
+
+window.GameHubUpdatePanel = UpdatePanel;
