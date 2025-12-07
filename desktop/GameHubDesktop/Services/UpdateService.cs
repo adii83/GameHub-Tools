@@ -126,8 +126,7 @@ namespace GameHubDesktop.Services
             }
 
             var uri = new Uri(metadata.DownloadUrl);
-            var fileName = GetInstallerFileName(metadata, uri);
-            var destinationPath = Path.Combine(_downloadDir, fileName);
+            var destinationPath = GetInstallerDestinationPath(metadata, uri);
 
             try
             {
@@ -466,15 +465,72 @@ namespace GameHubDesktop.Services
             var remoteName = Path.GetFileName(uri.LocalPath);
             if (!string.IsNullOrWhiteSpace(remoteName))
             {
-                var timestampSuffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                var timestampSuffix = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
                 var baseName = Path.GetFileNameWithoutExtension(remoteName);
                 var ext = Path.GetExtension(remoteName);
                 return string.IsNullOrWhiteSpace(baseName)
                     ? $"GameHubSetup-{timestampSuffix}{ext}"
                     : $"{baseName}-{timestampSuffix}{ext}";
             }
-            var versionPart = string.IsNullOrWhiteSpace(metadata.Version) ? DateTime.UtcNow.ToString("yyyyMMddHHmmss") : metadata.Version;
+            var versionPart = string.IsNullOrWhiteSpace(metadata.Version) ? DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") : metadata.Version;
             return $"GameHubSetup-{versionPart}.exe";
+        }
+
+        private string GetInstallerDestinationPath(UpdateMetadata metadata, Uri uri)
+        {
+            var fileName = GetInstallerFileName(metadata, uri);
+            var destinationPath = Path.Combine(_downloadDir, fileName);
+
+            if (!File.Exists(destinationPath))
+            {
+                return destinationPath;
+            }
+
+            if (!IsFileLocked(destinationPath))
+            {
+                try
+                {
+                    File.Delete(destinationPath);
+                    return destinationPath;
+                }
+                catch
+                {
+                    // Fall through to generate new file name
+                }
+            }
+
+            var baseName = Path.GetFileNameWithoutExtension(fileName);
+            var ext = Path.GetExtension(fileName);
+            var attempt = 1;
+
+            while (true)
+            {
+                var candidateName = $"{baseName}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{attempt}{ext}";
+                var candidatePath = Path.Combine(_downloadDir, candidateName);
+                if (!File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
+                attempt++;
+            }
+        }
+
+        private static bool IsFileLocked(string path)
+        {
+            if (!File.Exists(path)) return false;
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                return false;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
         }
 
         private static async Task<string> ComputeSha256Async(string filePath)
