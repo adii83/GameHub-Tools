@@ -5,7 +5,7 @@
   "sha256": "",
   "mandatory": false,
   "releaseNotes": [
-    "Rilis awal GameHub Desktop.",
+    "Rilis awal GameHub.",
     "Menambahkan perbaikan otomatis Fix Games tujuh tahap.",
     "Integrasi WebView2 dengan panel dashboard baru."
   ]
