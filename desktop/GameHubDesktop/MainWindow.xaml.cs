@@ -51,29 +51,63 @@ namespace GameHubDesktop
                 Services.SteamService.Log = (msg) => _appLog.Append(msg);
                 _fixGames.Log = (msg) => _appLog.Append(msg);
                 _updateService.Log = (msg) => _appLog.Append(msg);
-                var env = await CoreWebView2Environment.CreateAsync();
+
+                var userDataPath = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "GameHub",
+                    "WebView2Cache");
+                try
+                {
+                    System.IO.Directory.CreateDirectory(userDataPath);
+                }
+                catch (Exception dirEx)
+                {
+                    _appLog.Append($"Failed to create WebView2 cache directory: {dirEx.Message}");
+                    throw;
+                }
+
+                var env = await CoreWebView2Environment.CreateAsync(null, userDataPath);
                 await WebView.EnsureCoreWebView2Async(env);
 
-                // Cari folder "gamehub" secara dinamis agar tidak tergantung jumlah ".."
-                var baseDir = AppContext.BaseDirectory; // bin/Debug/net8.0-windows
-                var dirInfo = new System.IO.DirectoryInfo(baseDir);
-                while (dirInfo != null && dirInfo.Name.ToLower() != "gamehub")
+                // Cari folder "public" secara fleksibel agar path publish/installer ikut terbaca
+                var baseDir = AppContext.BaseDirectory;
+                string? resolvedRoot = null;
+                string? resolvedPublic = null;
+
+                var directPublic = System.IO.Path.Combine(baseDir, "public");
+                if (System.IO.Directory.Exists(directPublic))
                 {
-                    dirInfo = dirInfo.Parent;
+                    resolvedRoot = baseDir.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+                    resolvedPublic = directPublic;
                 }
-                if (dirInfo == null)
+                else
                 {
-                    System.Windows.MessageBox.Show("Folder 'gamehub' tidak ditemukan dari base: " + baseDir, "Startup Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                    var dirInfo = new System.IO.DirectoryInfo(baseDir);
+                    while (dirInfo != null && !dirInfo.Name.Equals("gamehub", StringComparison.OrdinalIgnoreCase))
+                    {
+                        dirInfo = dirInfo.Parent;
+                    }
+
+                    if (dirInfo != null)
+                    {
+                        var fallbackPublic = System.IO.Path.Combine(dirInfo.FullName, "public");
+                        if (System.IO.Directory.Exists(fallbackPublic))
+                        {
+                            resolvedRoot = dirInfo.FullName;
+                            resolvedPublic = fallbackPublic;
+                        }
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(resolvedPublic))
+                {
+                    System.Windows.MessageBox.Show("Folder 'public' tidak ditemukan dari base: " + baseDir, "Startup Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
                     return;
                 }
-                _baseDir = dirInfo.FullName; // .../gamehub
-                _appRoot = System.IO.Path.Combine(dirInfo.FullName, "public");
+
+                _baseDir = resolvedRoot ?? baseDir;
+                _appRoot = resolvedPublic;
                 string appRoot = _appRoot;
-                if (!System.IO.Directory.Exists(appRoot))
-                {
-                    System.Windows.MessageBox.Show("Folder 'public' tidak ditemukan: " + appRoot, "Startup Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
-                    return;
-                }
 
                 WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     "app.local", appRoot, CoreWebView2HostResourceAccessKind.Allow);
