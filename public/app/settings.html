@@ -76,6 +76,70 @@
           </button>
         </div>
       </div>
+
+      <!-- Update Card -->
+      <div class="bg-neutral-800/50 rounded-lg border border-white/10 p-6" id="update-card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold flex items-center gap-2">
+            <span>🚀</span>
+            <span>Application Update</span>
+          </h2>
+          <span id="update-status-pill" class="px-3 py-1 rounded-full text-xs font-semibold bg-neutral-700 text-gray-300">
+            Not checked
+          </span>
+        </div>
+
+        <p id="update-status-text" class="text-sm text-gray-400 mb-4">
+          Belum ada informasi update terbaru. Klik tombol di bawah untuk memulai pengecekan.
+        </p>
+
+        <dl class="space-y-2 text-sm mb-4">
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-400">Current Version</dt>
+            <dd id="update-current-version" class="font-medium text-white">-</dd>
+          </div>
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-400">Latest Version</dt>
+            <dd id="update-latest-version" class="font-medium text-white">-</dd>
+          </div>
+          <div class="flex items-center justify-between">
+            <dt class="text-gray-400">Last Checked</dt>
+            <dd id="update-last-checked" class="font-medium text-white">Never</dd>
+          </div>
+        </dl>
+
+        <div id="update-release-notes" class="hidden mb-4">
+          <p class="text-sm text-gray-400 mb-2">Release Notes</p>
+          <ul id="update-release-notes-list" class="list-disc list-inside text-sm text-gray-300 space-y-1"></ul>
+        </div>
+
+        <div id="update-progress-wrapper" class="hidden mb-4">
+          <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+            <span id="update-progress-label">Starting download...</span>
+            <span id="update-progress-value">0%</span>
+          </div>
+          <div class="h-2 bg-neutral-700 rounded-full overflow-hidden">
+            <div id="update-progress-bar" class="h-full bg-blue-500 transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-3">
+          <button id="btn-check-update" onclick="handleCheckUpdate()"
+            class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 hover:border-emerald-500/50 text-emerald-400 transition">
+            <span>🔍</span>
+            <span>Check for Updates</span>
+          </button>
+
+          <button id="btn-download-update" onclick="handleDownloadUpdate()"
+            class="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled>
+            <span>⬇️</span>
+            <span>Download Installer</span>
+          </button>
+
+          <p id="update-download-info" class="text-xs text-gray-400 hidden"></p>
+        </div>
+      </div>
     </div>
 
     <!-- RIGHT COLUMN: Logs -->
