@@ -3,9 +3,27 @@
 
 let modalQueue = [];
 let currentModal = null;
+let toastContainer = null;
+let lastToastSignature = null;
+let lastToastTimestamp = 0;
+
+function getToastContainer() {
+  if (toastContainer && document.body.contains(toastContainer)) {
+    return toastContainer;
+  }
+  toastContainer = document.createElement('div');
+  toastContainer.id = 'premium-toast-container';
+  toastContainer.className = 'fixed bottom-6 right-6 z-[9998] flex flex-col gap-3 w-[min(90vw,320px)] pointer-events-none';
+  document.body.appendChild(toastContainer);
+  return toastContainer;
+}
 
 // Premium Modal Component
 function showPremiumModal(options = {}) {
+  if (currentModal) {
+    modalQueue.push(options);
+    return;
+  }
   const {
     title = 'Notification',
     message = '',
@@ -18,22 +36,16 @@ function showPremiumModal(options = {}) {
     showCancel = false
   } = options;
 
-  // Remove existing modal if any
-  const existing = document.getElementById('premium-modal');
-  if (existing) {
-    existing.remove();
-  }
-
   // Create modal overlay
   const overlay = document.createElement('div');
   overlay.id = 'premium-modal';
   overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center';
-  overlay.style.cssText = 'backdrop-filter: blur(4px); animation: fadeIn 0.2s ease-out;';
+  overlay.style.cssText = 'backdrop-filter: blur(4px); animation: fadeIn 0.2s ease-out forwards;';
   
   // Create modal container
   const modal = document.createElement('div');
   modal.className = 'relative bg-gradient-to-br from-[#1a1a1a] to-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl p-6 max-w-md w-[90vw]';
-  modal.style.cssText = 'animation: slideUp 0.3s ease-out; box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1);';
+  modal.style.cssText = 'animation: slideUp 0.3s ease-out forwards; box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1);';
   
   // Type-based styling
   const typeConfig = {
@@ -83,7 +95,8 @@ function showPremiumModal(options = {}) {
   
   // Event handlers
   const closeModal = (result = false) => {
-    if (!overlay || !overlay.parentNode) return;
+    if (!overlay || !overlay.parentNode || overlay._isClosing) return;
+    overlay._isClosing = true;
     
     // Cleanup escape handler
     if (overlay._escapeHandler) {
@@ -91,8 +104,8 @@ function showPremiumModal(options = {}) {
       delete overlay._escapeHandler;
     }
     
-    overlay.style.animation = 'fadeOut 0.2s ease-out';
-    modal.style.animation = 'slideDown 0.2s ease-out';
+    overlay.style.animation = 'fadeOut 0.2s ease-out forwards';
+    modal.style.animation = 'slideDown 0.2s ease-out forwards';
     setTimeout(() => {
       if (overlay && overlay.parentNode) {
         overlay.remove();
@@ -215,26 +228,58 @@ function premiumConfirm(message, title = 'Konfirmasi') {
 // Premium Toast (replaces showTransientMessage)
 // Changed: No longer auto-closes, user must click OK button
 function showPremiumToast(message, duration = 0, type = 'info') {
-  // Queue if modal is showing
-  if (currentModal) {
-    modalQueue.push({
-      title: type === 'success' ? 'Berhasil' : type === 'error' ? 'Error' : 'Info',
-      message,
-      type,
-      duration: 0, // No auto-close, user must click OK
-      showCancel: false
-    });
+  const signature = `${type}:${message}`;
+  const now = Date.now();
+  if (signature === lastToastSignature && now - lastToastTimestamp < 500) {
     return;
   }
-  
-  showPremiumModal({
-    title: type === 'success' ? 'Berhasil' : type === 'error' ? 'Error' : 'Info',
-    message,
-    type,
-    duration: 0, // No auto-close, user must click OK
-    showCancel: false,
-    confirmText: 'OK'
+  lastToastSignature = signature;
+  lastToastTimestamp = now;
+
+  const container = getToastContainer();
+
+  const palette = {
+    info: { border: 'border-blue-400/30', bg: 'bg-blue-500/10', accent: 'text-blue-300', icon: 'ℹ️' },
+    success: { border: 'border-emerald-400/30', bg: 'bg-emerald-500/10', accent: 'text-emerald-300', icon: '✅' },
+    warning: { border: 'border-amber-400/30', bg: 'bg-amber-500/10', accent: 'text-amber-300', icon: '⚠️' },
+    error: { border: 'border-rose-400/30', bg: 'bg-rose-500/10', accent: 'text-rose-300', icon: '⚠️' }
+  };
+  const scheme = palette[type] || palette.info;
+
+  const toast = document.createElement('div');
+  toast.className = `pointer-events-auto rounded-2xl border ${scheme.border} ${scheme.bg} backdrop-blur-md p-4 text-white shadow-[0_20px_40px_rgba(0,0,0,0.35)] opacity-0 translate-y-4 transition-all duration-200`;
+  toast.innerHTML = `
+    <div class="flex items-start gap-3">
+      <div class="text-2xl ${scheme.accent}">${scheme.icon}</div>
+      <div class="flex-1">
+        <p class="text-sm leading-relaxed text-white/80">${escapeHtml(message)}</p>
+      </div>
+      <button class="text-white/50 hover:text-white text-xs uppercase tracking-[0.3em]">OK</button>
+    </div>
+  `;
+
+  const dismiss = () => {
+    toast.classList.remove('opacity-100', 'translate-y-0');
+    toast.classList.add('opacity-0', 'translate-y-2');
+    setTimeout(() => {
+      toast.remove();
+      if (toastContainer && toastContainer.children.length === 0) {
+        toastContainer.remove();
+        toastContainer = null;
+      }
+    }, 200);
+  };
+
+  toast.querySelector('button')?.addEventListener('click', dismiss);
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add('opacity-100', 'translate-y-0');
   });
+
+  if (duration > 0) {
+    setTimeout(dismiss, duration);
+  }
 }
 
 // Helper: escape HTML
