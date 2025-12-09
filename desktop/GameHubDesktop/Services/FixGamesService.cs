@@ -374,6 +374,19 @@ namespace GameHubDesktop.Services
                     };
                 }
 
+                if (!IsWindowsDefenderAvailable())
+                {
+                    LogInfo("Windows Defender tidak tersedia di sistem ini - melewati auto-exclude");
+                    return new
+                    {
+                        type = "FixGamesAutoExclude",
+                        success = false,
+                        defenderMissing = true,
+                        isAdmin,
+                        needsAdmin = false
+                    };
+                }
+
                 // Step 1: Try to add exclusion
                 // PERBAIKAN: Normalize path dan improve error handling
                 var normalizedPath = gamePath.Replace("'", "''").TrimEnd('\\');
@@ -1588,10 +1601,55 @@ namespace GameHubDesktop.Services
             return withoutExtension ?? string.Empty;
         }
 
+        private static bool IsWindowsDefenderAvailable()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"try { Get-MpPreference -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    return false;
+                }
+
+                if (!process.WaitForExit(5000))
+                {
+                    try
+                    {
+                        process.Kill();
+                    }
+                    catch { }
+                    return false;
+                }
+
+                return process.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool IndicatesDefenderCmdletsMissing(string? text)
         {
             if (string.IsNullOrWhiteSpace(text)) return false;
             var normalized = text.ToLowerInvariant();
+            if (normalized.Contains("invalid class") ||
+                normalized.Contains("invalid namespace") ||
+                normalized.Contains("msft_mppreference") ||
+                normalized.Contains("microsoft.windows.defender"))
+            {
+                return true;
+            }
             if (normalized.Contains("get-mppreference") || normalized.Contains("add-mppreference") ||
                 normalized.Contains("set-mppreference") || normalized.Contains("windows defender"))
             {
