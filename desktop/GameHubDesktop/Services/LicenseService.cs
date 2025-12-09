@@ -359,7 +359,7 @@ namespace GameHubDesktop.Services
                             IsActive = false,
                             IsValid = false,
                             ErrorMessage = errorMessage,
-                            LicenseKey = isBanned ? licenseKey : null // Jangan simpan license key jika banned
+                            LicenseKey = isBanned ? licenseKey : string.Empty // Jangan simpan license key jika banned
                         };
                     }
                 }

@@ -7,21 +7,26 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- Nama internal aplikasi (INI YANG DIPAKAI WINDOWS SEARCH) -->
+    <!-- Nama internal aplikasi -->
     <AssemblyName>GameHub</AssemblyName>
     <RootNamespace>GameHub</RootNamespace>
 
-    <!-- Metadata untuk Windows Search / Properties -->
+    <!-- Metadata untuk Windows Explorer -->
     <AssemblyTitle>GameHub</AssemblyTitle>
     <Product>GameHub</Product>
-    <FileDescription>GameHub</FileDescription>
+    <FileDescription>GameHub Desktop App</FileDescription>
     <Company>GameHub Tools</Company>
+
+    <!-- VERSIONING — INI YANG PALING PENTING -->
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
+    <Version>1.0.2</Version>
 
     <ApplicationIcon>Assets\gamehub.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2521.47" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2535.41" />
     <PackageReference Include="SharpCompress" Version="0.37.2" />
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
