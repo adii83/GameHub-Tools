@@ -186,7 +186,7 @@ namespace GameHubDesktop.Services
                             var rel = allUnderAppId && entry.FullName.StartsWith(appid + "/")
                                 ? entry.FullName.Substring(appid.ToString().Length + 1)
                                 : entry.FullName;
-                            var target = Path.Combine(installPath, rel.Replace('/', Path.DirectorySeparatorChar));
+                            var target = Path.Combine(installPath!, rel.Replace('/', Path.DirectorySeparatorChar));
                             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                             entry.ExtractToFile(target, true);
                             extracted.Add(rel.Replace("\\", "/"));
@@ -206,16 +206,18 @@ namespace GameHubDesktop.Services
                     foreach (var entry in archive.Entries)
                     {
                         if (entry.IsDirectory) continue;
-                        var name = entry.Key.Replace("\\", "/");
+                        var rawKey = entry.Key ?? string.Empty;
+                        var name = rawKey.Replace("\\", "/");
                         if (!name.StartsWith(appid + "/", StringComparison.Ordinal)) { allUnderAppId = false; break; }
                     }
                     LogInfo($"Mengekstrak {archive.Entries.Count} entri (SharpCompress) allUnderAppId={allUnderAppId} appid={appid}");
                     foreach (var entry in archive.Entries)
                     {
                         if (entry.IsDirectory) continue;
-                        var name = entry.Key.Replace("\\", "/");
+                        var rawKey = entry.Key ?? string.Empty;
+                        var name = rawKey.Replace("\\", "/");
                         var rel = allUnderAppId && name.StartsWith(appid + "/") ? name.Substring(appid.ToString().Length + 1) : name;
-                        var target = Path.Combine(installPath, rel.Replace('/', Path.DirectorySeparatorChar));
+                        var target = Path.Combine(installPath!, rel.Replace('/', Path.DirectorySeparatorChar));
                         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                         using var es = entry.OpenEntryStream();
                         using var fs = File.Create(target);
@@ -233,7 +235,7 @@ namespace GameHubDesktop.Services
                     var relIni = extracted.Find(x => x.EndsWith("unsteam.ini", StringComparison.OrdinalIgnoreCase));
                     if (!string.IsNullOrEmpty(relIni))
                     {
-                        var iniPath = Path.Combine(installPath, relIni.Replace('/', Path.DirectorySeparatorChar));
+                        var iniPath = Path.Combine(installPath!, relIni.Replace('/', Path.DirectorySeparatorChar));
                         try
                         {
                             var contents = await File.ReadAllTextAsync(iniPath, cts.Token);
@@ -249,8 +251,8 @@ namespace GameHubDesktop.Services
                 }
 
                 // Write log (new filename scheme)
-                gameName ??= TryGetSteamAppName(appid, installPath);
-                var logPath = Path.Combine(installPath, $"gamehub-fix-log-{appid}.log");
+                gameName ??= TryGetSteamAppName(appid, installPath!);
+                var logPath = Path.Combine(installPath!, $"gamehub-fix-log-{appid}.log");
                 using (var w = new StreamWriter(logPath, File.Exists(logPath)))
                 {
                     if (File.Exists(logPath)) w.WriteLine("---");

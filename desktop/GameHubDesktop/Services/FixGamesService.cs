@@ -38,6 +38,78 @@ namespace GameHubDesktop.Services
         private readonly ConcurrentDictionary<int, CancellationTokenSource> _cts = new();
         private string? _tempDownloadPath;
 
+        private sealed class AntivirusVendorProfile
+        {
+            public string VendorName { get; }
+            public string[] Keywords { get; }
+            public string[] ProcessNames { get; }
+
+            public AntivirusVendorProfile(string vendorName, string[] keywords, string[] processNames)
+            {
+                VendorName = vendorName;
+                Keywords = keywords;
+                ProcessNames = processNames;
+            }
+        }
+
+        private static readonly AntivirusVendorProfile[] KnownAntivirusVendors = new[]
+        {
+            new AntivirusVendorProfile(
+                "Avast / AVG",
+                new[] { "avast", "avg" },
+                new[] { "AvastSvc", "AvastUI", "afwServ", "AVGSvc" }
+            ),
+            new AntivirusVendorProfile(
+                "Bitdefender",
+                new[] { "bitdefender" },
+                new[] { "vsserv", "bdagent", "epsecurityservice" }
+            ),
+            new AntivirusVendorProfile(
+                "ESET",
+                new[] { "eset" },
+                new[] { "ekrn", "egui" }
+            ),
+            new AntivirusVendorProfile(
+                "Kaspersky",
+                new[] { "kaspersky" },
+                new[] { "avp", "avpui", "ksde" }
+            ),
+            new AntivirusVendorProfile(
+                "McAfee",
+                new[] { "mcafee" },
+                new[] { "McShield", "mfemms", "mcshieldservice" }
+            ),
+            new AntivirusVendorProfile(
+                "Norton",
+                new[] { "norton" },
+                new[] { "ns", "ccsvchst", "nortonsecurity" }
+            ),
+            new AntivirusVendorProfile(
+                "Trend Micro",
+                new[] { "trend" , "trend micro" },
+                new[] { "NTRtScan", "coreServiceShell" }
+            ),
+            new AntivirusVendorProfile(
+                "Sophos",
+                new[] { "sophos" },
+                new[] { "sophosav", "sophosclean", "hitmanpro" }
+            ),
+            new AntivirusVendorProfile(
+                "Malwarebytes",
+                new[] { "malwarebytes" },
+                new[] { "MBAMService", "mbamtray" }
+            ),
+            new AntivirusVendorProfile(
+                "Avira",
+                new[] { "avira" },
+                new[] { "avguard", "avgnt" }
+            ),
+            new AntivirusVendorProfile(
+                "Panda",
+                new[] { "panda" },
+                new[] { "PSANHost", "Panda_URL_Filtering" }
+            )
+        };
         public Action<string>? Log { get; set; }
         
         private void LogInfo(string message)
@@ -214,11 +286,27 @@ namespace GameHubDesktop.Services
                     catch { }
                 }
 
-                // Filter out Windows Defender
-                var nonDefenderAntivirus = antivirusList
-                    .Where(av => !av.Contains("Windows Defender", StringComparison.OrdinalIgnoreCase) &&
-                                 !av.Contains("Microsoft Defender", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                var runningProcessNames = TrySnapshotRunningProcessNames();
+
+                var nonDefenderAntivirus = new List<string>();
+                foreach (var av in antivirusList)
+                {
+                    if (av.Contains("Windows Defender", StringComparison.OrdinalIgnoreCase) ||
+                        av.Contains("Microsoft Defender", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (runningProcessNames != null &&
+                        TryGetVendorProfile(av, out var profile) &&
+                        !IsVendorProcessRunning(profile, runningProcessNames))
+                    {
+                        LogInfo($"Skip antivirus '{av}' - tidak ada proses aktif");
+                        continue;
+                    }
+
+                    nonDefenderAntivirus.Add(av);
+                }
 
                 bool hasNonDefender = nonDefenderAntivirus.Any();
                 
@@ -342,6 +430,21 @@ namespace GameHubDesktop.Services
                     // PERBAIKAN: Normalize output untuk menangkap format error yang aneh ("ERROR:\n+\n...")
                     var normalizedAddOutput = addOutput?.Replace("\r", "").Replace("\n", " ").Trim() ?? string.Empty;
                     var normalizedAddError = addError?.Replace("\r", "").Replace("\n", " ").Trim() ?? string.Empty;
+
+                    bool defenderMissing = IndicatesDefenderCmdletsMissing(normalizedAddOutput) ||
+                                            IndicatesDefenderCmdletsMissing(normalizedAddError);
+
+                    if (defenderMissing)
+                    {
+                        LogInfo("Windows Defender cmdlets tidak tersedia - melewati auto-exclude");
+                        return new
+                        {
+                            type = "FixGamesAutoExclude",
+                            success = false,
+                            defenderMissing = true,
+                            isAdmin
+                        };
+                    }
                     
                     bool hasErrorInAdd = !string.IsNullOrWhiteSpace(normalizedAddOutput) && 
                         normalizedAddOutput.Contains("ERROR:", StringComparison.OrdinalIgnoreCase);
@@ -466,6 +569,18 @@ namespace GameHubDesktop.Services
                         {
                             LogInfo($"Verify exclusion error: {verifyError.Trim()}");
                         }
+
+                        if (IndicatesDefenderCmdletsMissing(verifyOutput) || IndicatesDefenderCmdletsMissing(verifyError))
+                        {
+                            LogInfo("Windows Defender cmdlets tidak tersedia saat verifikasi - melewati auto-exclude");
+                            return new
+                            {
+                                type = "FixGamesAutoExclude",
+                                success = false,
+                                defenderMissing = true,
+                                isAdmin
+                            };
+                        }
                         
                         // Only return success if path is actually found in exclusion list
                         if (verifyOutput.Contains("FOUND", StringComparison.OrdinalIgnoreCase))
@@ -574,6 +689,16 @@ namespace GameHubDesktop.Services
             catch (Exception ex)
             {
                 LogInfo($"Error auto-exclude: {ex.Message}");
+                if (IndicatesDefenderCmdletsMissing(ex.Message))
+                {
+                    return new
+                    {
+                        type = "FixGamesAutoExclude",
+                        success = false,
+                        defenderMissing = true,
+                        isAdmin
+                    };
+                }
                 return new
                 {
                     type = "FixGamesAutoExclude",
@@ -1036,7 +1161,7 @@ namespace GameHubDesktop.Services
                         }
                         catch (Exception ex)
                         {
-                            LogInfo($"Download retry {retry + 1}/{maxRetries} failed");
+                            LogInfo($"Download retry {retry + 1}/{maxRetries} failed: {ex.Message}");
                             if (retry < maxRetries - 1)
                             {
                                 await Task.Delay(2000 * (retry + 1)); // Exponential backoff
@@ -1268,7 +1393,8 @@ namespace GameHubDesktop.Services
                                 {
                                     if (entry.IsDirectory) continue;
 
-                                    var entryPath = Path.Combine(extractedFolder, entry.Key.Replace('/', Path.DirectorySeparatorChar));
+                                    var entryKey = entry.Key ?? string.Empty;
+                                    var entryPath = Path.Combine(extractedFolder, entryKey.Replace('/', Path.DirectorySeparatorChar));
                                     var entryDir = Path.GetDirectoryName(entryPath);
                                     if (!string.IsNullOrWhiteSpace(entryDir) && !Directory.Exists(entryDir))
                                     {
@@ -1382,6 +1508,103 @@ namespace GameHubDesktop.Services
                     throw new Exception($"Part file terlalu kecil atau corrupt: {partFile} (size: {info.Length} bytes)");
                 }
             }
+        }
+
+        private static HashSet<string>? TrySnapshotRunningProcessNames()
+        {
+            Process[]? processes = null;
+            try
+            {
+                processes = Process.GetProcesses();
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        var name = process.ProcessName;
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            set.Add(name);
+                        }
+                    }
+                    catch
+                    {
+                        // Abaikan proses yang tidak bisa diakses
+                    }
+                }
+                return set;
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                if (processes != null)
+                {
+                    foreach (var process in processes)
+                    {
+                        try { process.Dispose(); } catch { }
+                    }
+                }
+            }
+        }
+
+        private static bool TryGetVendorProfile(string productName, out AntivirusVendorProfile profile)
+        {
+            foreach (var vendor in KnownAntivirusVendors)
+            {
+                foreach (var keyword in vendor.Keywords)
+                {
+                    if (productName.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    {
+                        profile = vendor;
+                        return true;
+                    }
+                }
+            }
+            profile = null!;
+            return false;
+        }
+
+        private static bool IsVendorProcessRunning(AntivirusVendorProfile vendor, HashSet<string> runningProcessNames)
+        {
+            foreach (var proc in vendor.ProcessNames)
+            {
+                var normalized = NormalizeProcessName(proc);
+                if (!string.IsNullOrWhiteSpace(normalized) && runningProcessNames.Contains(normalized))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static string NormalizeProcessName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            var withoutPath = Path.GetFileName(name);
+            var withoutExtension = Path.GetFileNameWithoutExtension(withoutPath);
+            return withoutExtension ?? string.Empty;
+        }
+
+        private static bool IndicatesDefenderCmdletsMissing(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var normalized = text.ToLowerInvariant();
+            if (normalized.Contains("get-mppreference") || normalized.Contains("add-mppreference") ||
+                normalized.Contains("set-mppreference") || normalized.Contains("windows defender"))
+            {
+                if (normalized.Contains("not recognized") ||
+                    normalized.Contains("not available") ||
+                    normalized.Contains("was not found") ||
+                    normalized.Contains("could not be loaded") ||
+                    normalized.Contains("is not installed"))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Step 6: Replace Files
@@ -2426,7 +2649,7 @@ namespace GameHubDesktop.Services
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 // Return null if extraction fails
                 return null;

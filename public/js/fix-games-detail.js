@@ -3,6 +3,7 @@
 let currentFixGame = null;
 let currentAppId = null;
 let isProcessing = false;
+let lastAntivirusResult = null;
 
 // Initialize detail page
 async function initFixGameDetailPage(appid, isSteamAccount = false) {
@@ -198,7 +199,10 @@ async function startFixGameProcess() {
     try {
       await checkAntivirus();
     } catch (e) {
-      // Antivirus check error (non-fatal) - continue to next step
+      if (e && (e.code === 'THIRD_PARTY_AV_BLOCKED' || e.message?.includes('antivirus pihak ketiga'))) {
+        throw e;
+      }
+      // Antivirus check error (non-fatal) - lanjut jika hanya kegagalan teknis
     }
     
     // Step 2: Detect Path (background)
@@ -230,49 +234,46 @@ async function startFixGameProcess() {
     updateProgress(30, 'Menambahkan ke exclusion list...');
     try {
       const excludeResult = await autoExcludePath(gamePath);
-      
-      // PERBAIKAN: Cek needsAdmin bahkan jika success = false atau undefined
-      // Check needsAdmin flag (bisa boolean atau string)
+      const defenderMissing = excludeResult && excludeResult.defenderMissing === true;
       const needsAdmin = excludeResult && (excludeResult.needsAdmin === true || excludeResult.needsAdmin === 'true');
-      
-      // Jika auto-exclude gagal atau butuh admin, handle dengan benar
-      if (excludeResult && !excludeResult.success) {
-        if (needsAdmin) {
-          // Tampilkan alert dan hentikan proses
-          alert(
-            '⚠️ Perhatian!\n\n' +
-            'Aplikasi perlu dijalankan sebagai Administrator untuk menambahkan folder game ke Windows Defender exclusion list.\n\n' +
-            'Tanpa ini, Windows Defender mungkin akan menghapus file game lagi setelah proses fix selesai.\n\n' +
-            'Silakan tutup aplikasi ini, jalankan sebagai Administrator, dan mulai ulang proses fix.'
-          );
-          // PERBAIKAN: Throw error yang jelas untuk menghentikan proses
-          throw new Error('Jalankan Aplikasi dengan Run Administrator dan Mulai Ulang');
-        } else {
-          // Jika gagal tapi bukan karena admin, throw error biasa
-          throw new Error(excludeResult.error || 'Gagal menambahkan ke exclusion list');
+
+      if (defenderMissing) {
+        updateProgress(40, 'Windows Defender tidak tersedia, melewati langkah exclusion...');
+        alert(
+          'ℹ️ Windows Defender tidak terpasang atau dinonaktifkan di perangkat ini sehingga langkah exclusion dilewati. Pastikan antivirus lain tidak menghapus file fix secara otomatis.'
+        );
+      } else {
+        if (excludeResult && !excludeResult.success) {
+          if (needsAdmin) {
+            alert(
+              '⚠️ Perhatian!\n\n' +
+              'Aplikasi perlu dijalankan sebagai Administrator untuk menambahkan folder game ke Windows Defender exclusion list.\n\n' +
+              'Tanpa ini, Windows Defender mungkin akan menghapus file game lagi setelah proses fix selesai.\n\n' +
+              'Silakan tutup aplikasi ini, jalankan sebagai Administrator, dan mulai ulang proses fix.'
+            );
+            throw new Error('Jalankan Aplikasi dengan Run Administrator dan Mulai Ulang');
+          } else {
+            throw new Error(excludeResult.error || 'Gagal menambahkan ke exclusion list');
+          }
         }
-      }
-      
-      // PERBAIKAN: Cek juga jika excludeResult null/undefined atau tidak ada success flag
-      if (!excludeResult || (excludeResult.success !== true && needsAdmin)) {
-        // Jika butuh admin tapi tidak ada success flag, juga tampilkan alert
-        if (needsAdmin) {
-          alert(
-            '⚠️ Perhatian!\n\n' +
-            'Aplikasi perlu dijalankan sebagai Administrator untuk menambahkan folder game ke Windows Defender exclusion list.\n\n' +
-            'Tanpa ini, Windows Defender mungkin akan menghapus file game lagi setelah proses fix selesai.\n\n' +
-            'Silakan tutup aplikasi ini, jalankan sebagai Administrator, dan mulai ulang proses fix.'
-          );
-          throw new Error('Jalankan Aplikasi dengan Run Administrator dan Mulai Ulang');
+
+        if (!excludeResult || (excludeResult.success !== true && needsAdmin)) {
+          if (needsAdmin) {
+            alert(
+              '⚠️ Perhatian!\n\n' +
+              'Aplikasi perlu dijalankan sebagai Administrator untuk menambahkan folder game ke Windows Defender exclusion list.\n\n' +
+              'Tanpa ini, Windows Defender mungkin akan menghapus file game lagi setelah proses fix selesai.\n\n' +
+              'Silakan tutup aplikasi ini, jalankan sebagai Administrator, dan mulai ulang proses fix.'
+            );
+            throw new Error('Jalankan Aplikasi dengan Run Administrator dan Mulai Ulang');
+          }
         }
       }
     } catch (e) {
-      // Jika error sudah jelas tentang admin, throw langsung
       if (e.message && e.message.includes('Jalankan Aplikasi dengan Run Administrator')) {
         throw e;
       }
-      
-      // Jika auto-exclude gagal karena butuh admin, tampilkan alert khusus
+
       if (e.message && (e.message.includes('Administrator') || e.message.includes('admin'))) {
         alert(
           '⚠️ Perhatian!\n\n' +
@@ -282,7 +283,6 @@ async function startFixGameProcess() {
         );
         throw new Error('Jalankan Aplikasi dengan Run Administrator dan Mulai Ulang');
       } else {
-        // Error lain, throw seperti biasa
         throw e;
       }
     }
@@ -379,6 +379,7 @@ function resetButtonState() {
 
 // Step 1: Check Antivirus (background)
 async function checkAntivirus() {
+  lastAntivirusResult = null;
   try {
     if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
       return new Promise((resolve, reject) => {
@@ -386,21 +387,29 @@ async function checkAntivirus() {
           reject(new Error('Timeout: Check antivirus tidak merespon'));
         }, 30000);
 
-        const handler = (msg) => {
-          if (msg.type === 'FixGamesAntivirusCheck') {
+        const handler = async (msg) => {
+          if (msg?.type === 'FixGamesAntivirusCheck') {
             clearTimeout(timeout);
             window.desktopBridge.offMessage(handler);
-            
+
             if (!msg.success) {
               reject(new Error(msg.error || 'Gagal memeriksa antivirus'));
               return;
             }
 
             if (msg.hasOtherAntivirus) {
-              const avList = msg.otherAntivirus.join(', ');
-              throw new Error(`Deteksi antivirus selain Windows Defender: ${avList}. Silakan uninstall dan gunakan Windows Defender saja.`);
+              const avList = Array.isArray(msg.otherAntivirus) && msg.otherAntivirus.length
+                ? msg.otherAntivirus
+                : ['antivirus pihak ketiga'];
+              const allow = await confirmThirdPartyAntivirus(avList);
+              if (!allow) {
+                const err = new Error('Proses dihentikan karena antivirus pihak ketiga terdeteksi.');
+                err.code = 'THIRD_PARTY_AV_BLOCKED';
+                reject(err);
+                return;
+              }
             }
-
+            lastAntivirusResult = msg;
             resolve(msg);
           }
         };
@@ -411,10 +420,31 @@ async function checkAntivirus() {
     } else {
       // Fallback untuk testing
       await new Promise(resolve => setTimeout(resolve, 500));
+      lastAntivirusResult = { hasWindowsDefender: true, hasOtherAntivirus: false };
     }
   } catch (e) {
     throw new Error('Gagal memeriksa antivirus: ' + e.message);
   }
+}
+
+async function confirmThirdPartyAntivirus(avList) {
+  const readableList = avList.join(', ');
+  const message = `Antivirus pihak ketiga terdeteksi: ${readableList}.
+Game mungkin tidak berjalan dengan benar selama antivirus ini aktif.
+
+Sebaiknya uninstall dan gunakan Windows Defender saja.
+
+Tetap lanjut?`;
+
+  if (typeof premiumConfirm === 'function') {
+    try {
+      return await premiumConfirm(message, 'Antivirus Terdeteksi');
+    } catch {
+      return false;
+    }
+  }
+
+  return window.confirm(message);
 }
 
 // Step 2: Auto-Exclude (background)
@@ -441,7 +471,7 @@ async function autoExcludePath(gamePath) {
       });
     } else {
       // Fallback untuk testing
-      return { success: true, isAdmin: false, needsAdmin: false };
+      return { success: true, isAdmin: false, needsAdmin: false, defenderMissing: false };
     }
   } catch (e) {
     throw new Error('Gagal menambahkan ke exclusion list: ' + e.message);
