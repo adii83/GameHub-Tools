@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -28,9 +29,11 @@ namespace GameHubDesktop.Services
             try
             {
                 var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-                var folder = Path.Combine(downloads, "gamehub");
+                var folder = Path.Combine(downloads, "GameHub Log");
                 Directory.CreateDirectory(folder);
-                var path = Path.Combine(folder, "gamehub.log");
+                var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss", CultureInfo.InvariantCulture);
+                var filename = $"gamehub-log-{timestamp}.txt";
+                var path = Path.Combine(folder, filename);
                 File.WriteAllLines(path, _lines.ToArray());
                 return (true, path, null);
             }

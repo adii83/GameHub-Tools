@@ -151,6 +151,10 @@
             <span>Application Logs</span>
           </h2>
           <div class="flex items-center gap-2">
+            <button onclick="downloadLogs()" 
+              class="px-3 py-1.5 rounded bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-sm transition">
+              ⬇️ Download
+            </button>
             <button onclick="refreshLogs()" 
               class="px-3 py-1.5 rounded bg-neutral-700 hover:bg-neutral-600 text-sm transition">
               🔄 Refresh
@@ -249,6 +253,23 @@
     const logBody = document.getElementById('settings-log-body');
     if (logBody) {
       logBody.textContent = '';
+    }
+  }
+
+  // Download logs ke folder Downloads/GameHub Log
+  function downloadLogs() {
+    try {
+      if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+        window.desktopBridge.send('SaveAppLog', {});
+        if (typeof showPremiumToast === 'function') {
+          showPremiumToast('Menyiapkan file log...', 1500, 'info');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to request log download:', e);
+      if (typeof showPremiumToast === 'function') {
+        showPremiumToast('Gagal memproses download log', 3000, 'error');
+      }
     }
   }
 
@@ -355,6 +376,17 @@
               }
             }
           }
+        } else if (data.type === 'AppLogSaved') {
+          const success = !!data.success;
+          const path = data.path || 'Downloads/GameHub Log';
+          const message = success
+            ? `Log disimpan ke ${path}`
+            : `Gagal menyimpan log: ${data.error || 'Unknown error'}`;
+          if (typeof showPremiumToast === 'function') {
+            showPremiumToast(message, success ? 3000 : 4000, success ? 'success' : 'error');
+          } else {
+            alert(message);
+          }
         }
       } catch (e) {
         console.error('Error parsing log message:', e);
@@ -376,5 +408,6 @@
   window.copyToClipboard = copyToClipboard;
   window.refreshLogs = refreshLogs;
   window.clearLogs = clearLogs;
+  window.downloadLogs = downloadLogs;
 </script>
 
