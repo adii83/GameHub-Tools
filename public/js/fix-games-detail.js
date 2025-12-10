@@ -2,6 +2,7 @@
 
 let currentFixGame = null;
 let currentAppId = null;
+let currentAccountId = null;
 let isProcessing = false;
 let lastAntivirusResult = null;
 const REPORT_LIMIT_STORAGE_KEY = 'steamAccountReportLimits';
@@ -41,9 +42,39 @@ function getTodayKey() {
   return new Date().toISOString().split('T')[0];
 }
 
+function normalizeSteamAccountGames(games) {
+  if (!Array.isArray(games)) return;
+  games.forEach((game, index) => {
+    if (!game || typeof game !== 'object') return;
+    game.category = 'steam-account';
+    if (game.premium === undefined) {
+      game.premium = false;
+    }
+    const fallback = `${game.appid || 'steam'}-${index}`;
+    game.accountId = String(game.accountId || game.username || fallback);
+  });
+}
+
+function selectSteamAccountGame(games, appidNum, accountId) {
+  if (!Array.isArray(games)) return null;
+  const normalizedAccountId = accountId ? String(accountId) : null;
+  for (const game of games) {
+    if (!game) continue;
+    const gAppid = typeof game.appid === 'string' ? parseInt(game.appid, 10) : game.appid;
+    if (gAppid !== appidNum) continue;
+    if (!normalizedAccountId) return game;
+    const candidateId = String(game.accountId || game.username || '');
+    if (candidateId === normalizedAccountId) {
+      return game;
+    }
+  }
+  return null;
+}
+
 // Initialize detail page
-async function initFixGameDetailPage(appid, isSteamAccount = false) {
+async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = null) {
   currentAppId = appid;
+  currentAccountId = accountId ? String(accountId) : null;
   isProcessing = false;
   
   try {
@@ -66,10 +97,7 @@ async function initFixGameDetailPage(appid, isSteamAccount = false) {
       
       while (!gameData && retryCount < maxRetries) {
         if (typeof window.steamGamesData !== 'undefined' && Array.isArray(window.steamGamesData) && window.steamGamesData.length > 0) {
-          gameData = window.steamGamesData.find(g => {
-            const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
-            return gAppid === appidNum;
-          });
+          gameData = selectSteamAccountGame(window.steamGamesData, appidNum, currentAccountId);
         }
         
         if (gameData) break;
@@ -88,10 +116,9 @@ async function initFixGameDetailPage(appid, isSteamAccount = false) {
           if (response.ok) {
             const json = await response.json();
             if (Array.isArray(json)) {
-              gameData = json.find(g => {
-                const gAppid = typeof g.appid === 'string' ? parseInt(g.appid, 10) : g.appid;
-                return gAppid === appidNum;
-              });
+              normalizeSteamAccountGames(json);
+              window.steamGamesData = json;
+              gameData = selectSteamAccountGame(json, appidNum, currentAccountId);
             }
           }
         } catch (e) {

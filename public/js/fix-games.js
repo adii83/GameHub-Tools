@@ -12,6 +12,19 @@
   let filterStandard = true;
   let filterPremium = true;
 
+  function normalizeSteamAccountGames(games) {
+    if (!Array.isArray(games)) return;
+    games.forEach((game, index) => {
+      if (!game || typeof game !== 'object') return;
+      game.category = 'steam-account';
+      if (game.premium === undefined) {
+        game.premium = false;
+      }
+      const fallback = `${game.appid || 'steam'}-${index}`;
+      game.accountId = String(game.accountId || game.username || fallback);
+    });
+  }
+
   // Filter by category
   async function filterFixGamesByCategory(category) {
     currentCategory = category;
@@ -48,14 +61,7 @@
             return game.appid && game.title && game.poster && game.username && game.password;
           });
           
-          validSteamGames.forEach(game => {
-            if (game && typeof game === 'object') {
-              game.category = 'steam-account';
-              if (game.premium === undefined) {
-                game.premium = false;
-              }
-            }
-          });
+          normalizeSteamAccountGames(validSteamGames);
           
           validSteamGames.sort((a, b) => {
             const titleA = (a.title || '').toUpperCase().replace(/[®™:]/g, '').trim();
@@ -151,15 +157,7 @@
                 return game.appid && game.title && game.poster && game.username && game.password;
               });
               
-              // Set category dan premium untuk Steam Account games
-              validSteamGames.forEach(game => {
-                if (game && typeof game === 'object') {
-                  game.category = 'steam-account';
-                  if (game.premium === undefined) {
-                    game.premium = false;
-                  }
-                }
-              });
+              normalizeSteamAccountGames(validSteamGames);
               
               // Merge fix games dan steam account games
               validGames.push(...validSteamGames);
@@ -292,16 +290,7 @@
           
           // Steam games format: array langsung [ {...}, {...} ]
           if (Array.isArray(json)) {
-            // Add category to each game
-            json.forEach(game => {
-              if (game && typeof game === 'object') {
-                game.category = 'steam-account';
-                // Set default premium: false jika tidak ada
-                if (game.premium === undefined) {
-                  game.premium = false;
-                }
-              }
-            });
+            normalizeSteamAccountGames(json);
             
             // Sort games alphabetically
             json.sort((a, b) => {
@@ -591,9 +580,14 @@
         ? 'bg-yellow-500 text-black' 
         : 'bg-gray-600 text-white';
       
+            const numericAppId = Number(game.appid) || 0;
+            const accountIdentifier = isSteamAccount ? (game.accountId || game.username || `${game.appid || ''}`) : '';
+            const encodedCategory = encodeURIComponent(String(game.category || ''));
+            const encodedAccountId = encodeURIComponent(String(accountIdentifier || ''));
+
       return `
         <div class="fix-game-card bg-[#151515] border border-white/5 cursor-pointer fade-up" 
-             onclick="openFixGameDetail(${game.appid}, '${game.category || ''}')">
+              onclick="openFixGameDetail(${numericAppId}, '${encodedCategory}', '${encodedAccountId}')">
           <img src="${escapeHtml(posterUrl)}" 
                alt="${escapeHtml(game.title)}"
                style="width: 100%; height: 100%; object-fit: cover;"
@@ -611,10 +605,42 @@
   }
 
   // Open fix game detail page
-  async function openFixGameDetail(appid) {
+  async function openFixGameDetail(appid, encodedCategory = '', encodedAccountId = '') {
+    const parsedAppId = parseInt(appid, 10);
+    let category = '';
+    let normalizedAccountId = null;
+    try {
+      category = encodedCategory ? decodeURIComponent(encodedCategory) : '';
+    } catch {
+      category = encodedCategory || '';
+    }
+    try {
+      normalizedAccountId = encodedAccountId ? decodeURIComponent(encodedAccountId) : null;
+    } catch {
+      normalizedAccountId = encodedAccountId || null;
+    }
+    if (normalizedAccountId !== null && normalizedAccountId !== undefined) {
+      normalizedAccountId = String(normalizedAccountId);
+      if (!normalizedAccountId.length) {
+        normalizedAccountId = null;
+      }
+    }
+
     // Cek apakah game dari kategori steam-account
-    const game = fixGamesData.find(g => g.appid === appid);
-    const isSteamAccount = game && game.category === 'steam-account';
+    const isSteamCategory = category === 'steam-account';
+    const game = fixGamesData.find(g => {
+      if (!g || parseInt(g.appid, 10) !== parsedAppId) {
+        return false;
+      }
+      if (!isSteamCategory) {
+        return true;
+      }
+      if (!normalizedAccountId) {
+        return g.category === 'steam-account';
+      }
+      return String(g.accountId || g.username || '') === normalizedAccountId;
+    });
+    const isSteamAccount = isSteamCategory || (game && game.category === 'steam-account');
     
     // Cek license dan premium status sebelum buka detail
     try {
@@ -662,7 +688,11 @@
     }
     
     // Navigate dengan flag untuk kategori steam-account
-    navigate('fix-games-detail', { appid, isSteamAccount: isSteamAccount ? true : undefined });
+    navigate('fix-games-detail', {
+      appid: parsedAppId,
+      accountId: normalizedAccountId || undefined,
+      isSteamAccount: isSteamAccount ? true : undefined
+    });
   }
 
   // Show empty state
