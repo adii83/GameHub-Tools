@@ -154,6 +154,7 @@ async function navigate(page, params = {}) {
     // Get appid from navigate params
     const navigateParams = window._lastNavigateParams || {};
     const appid = navigateParams.appid;
+    const accountId = navigateParams.accountId || params.accountId;
     
     if (!appid) {
       alert('AppID tidak ditemukan!');
@@ -168,7 +169,7 @@ async function navigate(page, params = {}) {
       script.onload = () => {
         setTimeout(() => {
           if (typeof initFixGameDetailPage === 'function') {
-            initFixGameDetailPage(parseInt(appid), isSteamAccount);
+            initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null);
           }
         }, 50);
       };
@@ -176,7 +177,7 @@ async function navigate(page, params = {}) {
     } else {
       setTimeout(() => {
         if (typeof initFixGameDetailPage === 'function') {
-          initFixGameDetailPage(parseInt(appid), isSteamAccount);
+          initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null);
         }
       }, 50);
     }
