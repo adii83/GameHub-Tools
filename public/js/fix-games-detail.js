@@ -4,6 +4,42 @@ let currentFixGame = null;
 let currentAppId = null;
 let isProcessing = false;
 let lastAntivirusResult = null;
+const REPORT_LIMIT_STORAGE_KEY = 'steamAccountReportLimits';
+const REPORT_LIMIT_MAX_PER_DAY = 2;
+let reportLimitFallbackCache = {};
+
+function readReportLimitMap() {
+  try {
+    if (typeof window.localStorage === 'undefined') {
+      return reportLimitFallbackCache;
+    }
+    const raw = window.localStorage.getItem(REPORT_LIMIT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+    return {};
+  } catch {
+    return reportLimitFallbackCache;
+  }
+}
+
+function writeReportLimitMap(map) {
+  try {
+    if (typeof window.localStorage === 'undefined') {
+      reportLimitFallbackCache = map;
+      return;
+    }
+    window.localStorage.setItem(REPORT_LIMIT_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    reportLimitFallbackCache = map;
+  }
+}
+
+function getTodayKey() {
+  return new Date().toISOString().split('T')[0];
+}
 
 // Initialize detail page
 async function initFixGameDetailPage(appid, isSteamAccount = false) {
@@ -978,9 +1014,15 @@ function renderSteamAccountDetail(game) {
       <div>
         <h3 class="text-lg font-semibold mb-3">Instruksi Penggunaan</h3>
         <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-4">
-          <p class="text-gray-300 text-sm leading-relaxed">
-            Jika akun tidak berhasil login harap segera hubungi admin!!
-          </p>
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-gray-300 text-sm leading-relaxed">
+              Jika akun tidak berhasil login harap segera hubungi admin!!
+            </p>
+            <button onclick="reportSteamAccountIssue()"
+                    class="px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-400/30 text-sm font-semibold text-blue-200 hover:bg-blue-500/30 transition">
+              Laporkan Akun
+            </button>
+          </div>
         </div>
         <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-4 mb-4">
           <p class="text-green-400 font-semibold mb-3">Jika berhasil Login ikuti instruksi dibawah ini:</p>
@@ -1067,6 +1109,76 @@ function showCopySuccess(elementId) {
 
 // Expose copyToClipboard globally
 window.copyToClipboard = copyToClipboard;
+
+async function reportSteamAccountIssue() {
+  if (!currentFixGame || currentFixGame.category !== 'steam-account') {
+    const fallbackMsg = 'Data akun Steam tidak ditemukan. Coba buka ulang halaman ini.';
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert(fallbackMsg, 'Laporkan Akun');
+    } else {
+      alert(fallbackMsg);
+    }
+    return;
+  }
+
+  const limits = readReportLimitMap();
+  const todayKey = getTodayKey();
+  const appKey = String(currentFixGame.appid || '');
+  let appLimit = limits[appKey];
+
+  if (appLimit && appLimit.date === todayKey && appLimit.count >= REPORT_LIMIT_MAX_PER_DAY) {
+    const limitMsg = 'Anda sudah mengirim 2 laporan untuk akun ini dalam 24 jam terakhir. Tunggu hingga besok untuk mengirim laporan baru.';
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert(limitMsg, 'Batas Laporan Tercapai');
+    } else {
+      alert(limitMsg);
+    }
+    return;
+  }
+
+  if (!appLimit || appLimit.date !== todayKey) {
+    appLimit = { date: todayKey, count: 0 };
+    limits[appKey] = appLimit;
+  }
+
+  const chatId = '8491267458';
+  const botToken = '8122332462:AAFwFdGrIA2w5WaEOWetf-bCSkz0luJ_KSo';
+  const reportText = [
+    '🚨 Laporan Akun Steam',
+    `AppID : ${currentFixGame.appid || '-'} `,
+    `Game  : ${currentFixGame.title || '-'} `,
+    `User  : ${currentFixGame.username || '-'} `,
+    `Pass  : ${currentFixGame.password || '-'} `,
+    'Status: Tidak bisa login (dilaporkan user)'
+  ].join('\n');
+
+  const encodedText = encodeURIComponent(reportText);
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage?chat_id=${chatId}&text=${encodedText}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const successMsg = 'Laporan akun sudah dikirim. Admin akan segera memeriksa.';
+    appLimit.count = Math.min(appLimit.count + 1, REPORT_LIMIT_MAX_PER_DAY);
+    writeReportLimitMap(limits);
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert(successMsg, 'Laporan Terkirim');
+    } else {
+      alert(successMsg);
+    }
+  } catch (error) {
+    const errorMsg = 'Gagal mengirim laporan. Mohon coba lagi beberapa saat.';
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert(`${errorMsg}\n\nDetail: ${error.message || error}`, 'Laporan Gagal');
+    } else {
+      alert(`${errorMsg}\n\nDetail: ${error.message || error}`);
+    }
+  }
+}
+
+window.reportSteamAccountIssue = reportSteamAccountIssue;
 
 // Escape HTML helper
 function escapeHtml(str) {
