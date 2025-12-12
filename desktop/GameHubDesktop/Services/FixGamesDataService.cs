@@ -11,7 +11,7 @@ namespace GameHubDesktop.Services
     public static class FixGamesDataService
     {
         private const string FIX_GAMES_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/fix_games.json";
-        private const int CACHE_TTL_HOURS = 6; // Override lebih sering di-update (6 jam)
+        private const int CACHE_TTL_HOURS = 24;
         
         private static readonly string CacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GameHub");
         private static readonly string CacheFile = Path.Combine(CacheDir, "fix_games.json");
@@ -58,8 +58,9 @@ namespace GameHubDesktop.Services
                 }
             }
 
-            // Check disk cache
-            if (!forceRefresh && IsCacheValid())
+            var cacheValid = !forceRefresh && IsCacheValid();
+
+            if (cacheValid)
             {
                 try
                 {
@@ -75,116 +76,23 @@ namespace GameHubDesktop.Services
                         progressCallback?.Invoke(100, "Data dimuat dari cache");
                         return data;
                     }
+
+                    cacheValid = false;
                 }
                 catch (Exception ex)
                 {
+                    cacheValid = false;
                     LogInfo($"Failed to load from disk cache: {ex.Message}");
                 }
             }
 
-            // Check if server file has changed (ETag/LastModified check)
-            // PERBAIKAN: Jika forceRefresh = true, skip ETag check dan langsung download
-            bool needsDownload = forceRefresh;
-            string? serverETag = null;
-            string? serverLastModified = null;
-            
-            if (!forceRefresh)
+            if (forceRefresh)
             {
-                try
-                {
-                    var serverHeaders = await CheckServerHeadersAsync();
-                    if (serverHeaders != null)
-                    {
-                        serverETag = serverHeaders.Value.ETag;
-                        serverLastModified = serverHeaders.Value.LastModified;
-                        
-                        // Load cached meta to compare
-                        if (File.Exists(MetaFile))
-                        {
-                            try
-                            {
-                                var metaJson = File.ReadAllText(MetaFile);
-                                var cachedMeta = JsonSerializer.Deserialize<CacheMeta>(metaJson);
-                                
-                                if (cachedMeta != null)
-                                {
-                                    // Compare ETag first (most reliable)
-                                    if (!string.IsNullOrWhiteSpace(serverETag) && 
-                                        !string.IsNullOrWhiteSpace(cachedMeta.ETag) &&
-                                        serverETag.Equals(cachedMeta.ETag, StringComparison.Ordinal))
-                                    {
-                                        LogInfo("Server file unchanged (ETag match), using cache");
-                                        needsDownload = false;
-                                    }
-                                    // Fallback to LastModified if ETag not available
-                                    else if (string.IsNullOrWhiteSpace(serverETag) &&
-                                             !string.IsNullOrWhiteSpace(serverLastModified) &&
-                                             !string.IsNullOrWhiteSpace(cachedMeta.LastModified) &&
-                                             serverLastModified.Equals(cachedMeta.LastModified, StringComparison.Ordinal))
-                                    {
-                                        LogInfo("Server file unchanged (LastModified match), using cache");
-                                        needsDownload = false;
-                                    }
-                                    else
-                                    {
-                                        LogInfo($"Server file changed (ETag/LastModified mismatch), downloading...");
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                LogInfo($"Error checking cache meta: {ex.Message}, will download");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogInfo($"Error checking server headers: {ex.Message}, will download");
-                }
+                LogInfo("Force refresh requested, downloading latest fix_games.json");
             }
             else
             {
-                LogInfo("Force refresh requested, downloading...");
-            }
-
-            // If file unchanged, return cached data
-            if (!needsDownload && File.Exists(CacheFile))
-            {
-                try
-                {
-                    progressCallback?.Invoke(100, "File tidak berubah, menggunakan cache");
-                    var cached = LoadFromDisk();
-                    if (cached != null)
-                    {
-                        lock (_lock)
-                        {
-                            _cachedData = cached;
-                            _lastLoadTime = DateTime.UtcNow;
-                        }
-                        // Update meta timestamp (keep ETag/LastModified)
-                        if (File.Exists(MetaFile))
-                        {
-                            try
-                            {
-                                var metaJson = File.ReadAllText(MetaFile);
-                                var meta = JsonSerializer.Deserialize<CacheMeta>(metaJson);
-                                if (meta != null)
-                                {
-                                    meta.Timestamp = DateTime.UtcNow; // Update timestamp only
-                                    var updatedMetaJson = JsonSerializer.Serialize(meta);
-                                    File.WriteAllText(MetaFile, updatedMetaJson);
-                                }
-                            }
-                            catch { }
-                        }
-                        return cached;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogInfo($"Error loading cached file: {ex.Message}, will download");
-                }
+                LogInfo("Cache expired atau tidak valid (>=24 jam), downloading latest fix_games.json");
             }
 
             // Download fresh data
@@ -306,36 +214,6 @@ namespace GameHubDesktop.Services
             {
                 LogInfo($"SaveToDisk error: {ex.Message}");
                 throw;
-            }
-        }
-
-        // Check server headers (ETag/LastModified) without downloading
-        private static async Task<(string? ETag, string? LastModified)?> CheckServerHeadersAsync()
-        {
-            using var http = new HttpClient();
-            http.Timeout = TimeSpan.FromSeconds(30);
-
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Head, FIX_GAMES_URL);
-                req.Headers.Add("User-Agent", "GameHub/1.0");
-                
-                using var resp = await http.SendAsync(req);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    LogInfo($"HEAD request failed with status: {(int)resp.StatusCode}");
-                    return null;
-                }
-
-                var eTag = resp.Headers.ETag?.Tag;
-                var lastModified = resp.Content.Headers.LastModified?.ToString("R"); // RFC 1123 format
-                
-                return (eTag, lastModified);
-            }
-            catch (Exception ex)
-            {
-                LogInfo($"CheckServerHeadersAsync error: {ex.Message}");
-                return null;
             }
         }
 
