@@ -172,6 +172,49 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
       return;
     }
     
+    // PROTEKSI GLOBAL TINGKAT HALAMAN: Cegah bypass akses via URL/fungsi navigate langsung
+    let licenseCheckPassed = false;
+    try {
+      if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+        const licenseInfo = await window.desktopBridge.getLicenseInfo();
+        
+        if (!licenseInfo.isValid || !licenseInfo.isActive) {
+          if (typeof premiumAlert === 'function') {
+            await premiumAlert('License tidak valid. Silakan aktivasi license terlebih dahulu.', 'License Tidak Valid');
+          } else {
+            alert('License tidak valid.');
+          }
+          navigate('fix-games');
+          return;
+        }
+        
+        if (gameData.premium === true && licenseInfo.plan === 'standard') {
+          if (typeof premiumAlert === 'function') {
+            await premiumAlert('Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁', 'Fitur Premium');
+          } else {
+            alert('Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁');
+          }
+          navigate('fix-games');
+          return;
+        }
+        licenseCheckPassed = true;
+      } else {
+        // Fallback fail-secure jika environment bridge tidak disupport
+        navigate('fix-games');
+        return;
+      }
+    } catch (e) {
+      if (typeof premiumAlert === 'function') {
+        await premiumAlert('Verifikasi license gagal. Pastikan aplikasi berjalan dengan benar.', 'Verifikasi Gagal');
+      } else {
+        alert('Verifikasi license gagal.');
+      }
+      navigate('fix-games');
+      return;
+    }
+
+    if (!licenseCheckPassed) return;
+    
     currentFixGame = gameData;
     
     // Render based on category

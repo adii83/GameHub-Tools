@@ -61,7 +61,8 @@ function applyFilters(render = true) {
       if (libraryFilterActive && libraryAppIds.size > 0) {
         if (!libraryAppIds.has(String(game.appid))) return false;
       }
-    const isPremium = game.price_initial >= PREMIUM_MIN;
+    const PREMIUM_MIN = 130000;
+    const isPremium = ((game.price_normalized || game.price_initial || 0) >= PREMIUM_MIN) || (game.premium === true);
 
     // Search: fuzzy match normalized title or exact appid when numeric
     if (searchNorm) {

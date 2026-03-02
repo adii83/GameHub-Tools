@@ -1086,7 +1086,8 @@ function appendGameCard(list, game) {
 
 function renderGameCardHTML(game) {
   // Use normalized price for premium detection when available
-  const isPremium = (game.price_normalized || game.price_initial || 0) >= PREMIUM_MIN;
+  const PREMIUM_MIN = 130000;
+  const isPremium = ((game.price_normalized || game.price_initial || 0) >= PREMIUM_MIN) || (game.premium === true);
   const premiumLabel = isPremium ? "PREMIUM" : "STANDAR";
   const premiumColor = isPremium
     ? "bg-yellow-500 text-black"

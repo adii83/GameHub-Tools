@@ -254,9 +254,9 @@ async function openDetail(appid) {
   // Helper untuk menentukan apakah game premium atau standard
   function isGamePremium(gameData) {
     if (!gameData) return false;
-    const PREMIUM_MIN = 350000; // Threshold untuk premium game
+    const PREMIUM_MIN = 130000; // Threshold untuk premium game
     const price = gameData.price_normalized || gameData.price_initial || 0;
-    return price >= PREMIUM_MIN;
+    return (price >= PREMIUM_MIN) || (gameData.premium === true);
   }
 
   // Helper logging sumber data ke AppLog (desktop)
@@ -529,6 +529,7 @@ async function openDetail(appid) {
   }
 
   // Check license setelah mendapatkan game data
+  let licenseOk = false;
   try {
     if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
       const licenseInfo = await window.desktopBridge.getLicenseInfo();
@@ -544,9 +545,9 @@ async function openDetail(appid) {
       
       // Jika plan adalah "standard", cek apakah game premium
       if (licenseInfo.plan === 'standard') {
-        const PREMIUM_MIN = 350000; // Threshold untuk premium game
+        const PREMIUM_MIN = 130000; // Threshold untuk premium game
         const price = g.price_normalized || g.price_initial || 0;
-        const gameIsPremium = price >= PREMIUM_MIN;
+        const gameIsPremium = (price >= PREMIUM_MIN) || (g.premium === true);
         
         // Jika game premium, block untuk plan standard
         if (gameIsPremium) {
@@ -554,16 +555,23 @@ async function openDetail(appid) {
             'Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁',
             'Fitur Premium'
           );
-          return; // Jangan buka modal detail
+          return;
         }
-        // Jika game standard, lanjutkan (allow)
       }
-      
-      // Plan premium: allow semua game (tidak perlu cek)
+      licenseOk = true;
+    } else {
+      // Bridge tidak tersedia - block
+      return;
     }
   } catch (e) {
-    // License check error - non-critical
+    // License check gagal - fail-secure: block akses
+    premiumAlert(
+      'Verifikasi license gagal. Pastikan aplikasi berjalan dengan benar.',
+      'Verifikasi Gagal'
+    );
+    return;
   }
+  if (!licenseOk) return;
 
   const drawer = document.getElementById('detail-drawer');
   const panel = document.getElementById('detail-drawer-panel');
@@ -721,7 +729,8 @@ async function openDetail(appid) {
 
     // Trigger an initial availability check when detail opens
     // Hapus auto-check pada saat detail dibuka; cek hanya saat tombol ditekan
-  const isPremium = g.price_initial >= PREMIUM_MIN;
+  const PREMIUM_MIN = 130000;
+  const isPremium = (g.price_initial >= PREMIUM_MIN) || (g.premium === true);
   // Build genre badges using local catalog (cached)
   function getGenreCatalogSync() { return (window._genreCatalog || []); }
   async function ensureGenreCatalog() {
