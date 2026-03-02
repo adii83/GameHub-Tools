@@ -653,6 +653,7 @@
     const isSteamAccount = isSteamCategory || (game && game.category === 'steam-account');
     
     // Cek license dan premium status sebelum buka detail
+    let licenseCheckPassed = false;
     try {
       if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
         const licenseInfo = await window.desktopBridge.getLicenseInfo();
@@ -667,11 +668,22 @@
           }
           return;
         }
+
+        // Jika game tidak ditemukan di data, block (tidak bisa verifikasi premium status)
+        if (!game) {
+          if (typeof premiumAlert === 'function') {
+            await premiumAlert(
+              'Data game tidak ditemukan. Silakan coba lagi.',
+              'Game Tidak Ditemukan'
+            );
+          }
+          return;
+        }
         
         // Untuk kategori steam-account, cek premium status
         if (isSteamAccount) {
           // Jika game premium dan license masih standard, block akses Steam Account
-          if (game && game.premium === true && licenseInfo.plan === 'standard') {
+          if (game.premium === true && licenseInfo.plan === 'standard') {
             if (typeof premiumAlert === 'function') {
               await premiumAlert(
                 'Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁',
@@ -682,7 +694,7 @@
           }
         } else {
           // Untuk kategori lain, cek premium seperti biasa
-          if (game && game.premium === true && licenseInfo.plan === 'standard') {
+          if (game.premium === true && licenseInfo.plan === 'standard') {
             if (typeof premiumAlert === 'function') {
               await premiumAlert(
                 'Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁',
@@ -692,10 +704,23 @@
             return;
           }
         }
+        licenseCheckPassed = true; // License OK, lanjutkan
+      } else {
+        // Bridge tidak tersedia - block akses
+        return;
       }
     } catch (e) {
-      // License check error - non-critical
+      // License check gagal - block untuk keamanan (fail-secure)
+      if (typeof premiumAlert === 'function') {
+        await premiumAlert(
+          'Verifikasi license gagal. Pastikan aplikasi berjalan dengan benar.',
+          'Verifikasi Gagal'
+        );
+      }
+      return;
     }
+
+    if (!licenseCheckPassed) return;
     
     // Navigate dengan flag untuk kategori steam-account
     navigate('fix-games-detail', {

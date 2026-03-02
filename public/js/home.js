@@ -157,8 +157,8 @@ function renderNewFixGames(games) {
     const encodedAccountId = encodeURIComponent(String(accountIdentifier || ''));
 
     const html = `
-      <div class="snap-start shrink-0 home-card-hover fix-game-card bg-[#151515] border border-white/5 cursor-pointer fade-up" 
-            onclick="navigate('fix-games-detail', { appid: ${numericAppId}, isSteamAccount: ${game.category === 'steam-account'}, accountId: '${encodedAccountId}' })"
+      <div class="flex items-center gap-4 bg-white/5 hover:bg-white/10 p-3 rounded-xl transition cursor-pointer border border-white/5 group"
+            onclick="openFixGameDetailFromHome(${numericAppId}, ${game.category === 'steam-account'}, '${encodedAccountId}')"
             style="min-width: 200px; width: 200px; height: 300px; position: relative;">
         <img src="${escapeHtml(game.poster || '')}" 
              alt="${escapeHtml(game.title)}"
@@ -267,6 +267,55 @@ function renderPopularGames() {
   }
 }
 
+// Global function to open fix games detail from home with license verification
+window.openFixGameDetailFromHome = async function(appid, isSteamAccount, accountId) {
+  try {
+    if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
+      const licenseInfo = await window.desktopBridge.getLicenseInfo();
+      
+      if (!licenseInfo.isValid || !licenseInfo.isActive) {
+        if (typeof premiumAlert === 'function') {
+          await premiumAlert('License tidak valid. Silakan aktivasi license terlebih dahulu.', 'License Tidak Valid');
+        } else {
+          alert('License tidak valid.');
+        }
+        return;
+      }
+      
+      // Ambil game object dari state page yang sudah di-compile dan berbentuk Array (menghindari error .find is not a function)
+      let gameData = null;
+      if (typeof homePageData !== 'undefined' && Array.isArray(homePageData.newFixGames)) {
+        gameData = homePageData.newFixGames.find(g => 
+          g.appid == appid && 
+          (!isSteamAccount || !accountId || String(g.accountId || g.username || g.appid) === String(accountId))
+        );
+      }
+      
+      // Jika game ditemukan dan premium, lalu plan user standard -> BLOCK
+      if (gameData && gameData.premium === true && licenseInfo.plan === 'standard') {
+        if (typeof premiumAlert === 'function') {
+          await premiumAlert('Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁', 'Fitur Premium');
+        } else {
+          alert('Upgrade Ke Premium Dulu, Ya, Untuk Buka Fitur Ini 😁');
+        }
+        return;
+      }
+    }
+  } catch (e) {
+    if (typeof premiumAlert === 'function') {
+      await premiumAlert('Verifikasi license gagal. Pastikan aplikasi berjalan dengan benar.', 'Verifikasi Gagal');
+    }
+    return;
+  }
+  
+  // Jika lolos semua check, navigate
+  navigate('fix-games-detail', { 
+    appid: appid, 
+    isSteamAccount: isSteamAccount, 
+    accountId: accountId 
+  });
+};
+
 function loadMorePopularGames() {
   homePageData.popularGamesLimit += 24;
   renderPopularGames();
@@ -277,7 +326,8 @@ function loadMorePopularGames() {
  */
 function renderPopularCardHTML(game) {
   // Use normalized price for premium detection when available
-  const isPremium = (game.price_normalized || game.price_initial || 0) >= PREMIUM_MIN;
+  const PREMIUM_MIN = 130000;
+  const isPremium = ((game.price_normalized || game.price_initial || 0) >= PREMIUM_MIN) || (game.premium === true);
   const premiumLabel = isPremium ? "PREMIUM" : "STANDAR";
   const premiumColor = isPremium
     ? "bg-yellow-500 text-black"

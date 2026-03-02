@@ -5,6 +5,13 @@
   "sha256": "06C03628056BD45140807F88DE24480E5FADF49879A4C3A4C08B9CD9544A9495",
   "mandatory": false,
   "releaseNotes": [
-    "Rilis awal GameHub."
-  ]
+  "Major update: UI/UX yang lebih baik dan modern",
+  "Fitur baru: Pembuatan shortcut Desktop otomatis setelah proses fix selesai",
+  "Fitur baru: Auto Get Steam Guard Code",
+  "Fitur baru: Indikator metode jalankan game (Steam / Shortcut Desktop)",
+  "Peningkatan: Deteksi executable game lebih presisi",
+  "Perbaikan: Berbagai bug di halaman Games, filter, dan panel game",
+  "Peningkatan: Penanganan game Denuvo lebih akurat"
+]
+
 }
