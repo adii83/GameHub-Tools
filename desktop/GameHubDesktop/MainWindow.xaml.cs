@@ -4,11 +4,15 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 
 namespace GameHubDesktop
 {
     public partial class MainWindow : Window
     {
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         private string _appRoot = string.Empty;
         private string _baseDir = string.Empty;
         private readonly Services.OnlineFixService _onlineFix = new Services.OnlineFixService();
@@ -21,7 +25,37 @@ namespace GameHubDesktop
         public MainWindow()
         {
             InitializeComponent();
-            Loaded += async (_, __) => await InitializeAsync();
+            Loaded += async (_, __) => {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    int trueValue = 1;
+                    DwmSetWindowAttribute(hwnd, 20, ref trueValue, sizeof(int));
+                    DwmSetWindowAttribute(hwnd, 19, ref trueValue, sizeof(int));
+                }
+                await InitializeAsync();
+            };
+            PreviewKeyDown += MainWindow_PreviewKeyDown;
+        }
+
+        private void MainWindow_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            // F5 Hot-Reload (Hard Refresh)
+            if (e.Key == System.Windows.Input.Key.F5)
+            {
+                try
+                {
+                    _appLog.Append("F5 pressed: Reloading WebView...");
+                    if (WebView != null && WebView.CoreWebView2 != null)
+                    {
+                        WebView.CoreWebView2.Reload();
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    _appLog.Append($"F5 Reload Error: {ex.Message}");
+                }
+            }
         }
 
         private async Task InitializeAsync()
@@ -46,6 +80,8 @@ namespace GameHubDesktop
                 Services.FixGamesDataService.Log = (msg) => _appLog.Append(msg);
                 Services.SteamGamesDataService.Initialize();
                 Services.SteamGamesDataService.Log = (msg) => _appLog.Append(msg);
+                Services.HomeDataService.Initialize();
+                Services.HomeDataService.Log = (msg) => _appLog.Append(msg);
                 _onlineFix.Log = (msg) => _appLog.Append(msg);
                 Services.AddGameService.Log = (msg) => _appLog.Append(msg);
                 Services.SteamService.Log = (msg) => _appLog.Append(msg);
@@ -223,8 +259,34 @@ namespace GameHubDesktop
                     }
                 };
 
+                // Inject JS console interceptor so console.log/warn/error appears in CMD
+                try
+                {
+                    await WebView.CoreWebView2.ExecuteScriptAsync(@"
+(function() {
+    const _con = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+    ['log','warn','error','info'].forEach(function(lvl) {
+        console[lvl] = function() {
+            _con[lvl].apply(console, arguments);
+            try {
+                var msg = Array.from(arguments).map(function(a){
+                    return (typeof a === 'object') ? JSON.stringify(a) : String(a);
+                }).join(' ');
+                if (window.chrome && window.chrome.webview) {
+                    window.chrome.webview.postMessage({ type: 'JsLog', level: lvl, message: msg });
+                }
+            } catch(e) {}
+        };
+    });
+})();
+                    ");
+                }
+                catch (Exception exJs)
+                {
+                    _appLog.Append($"[JS Console Intercept] inject error: {exJs.Message}");
+                }
 
-                Width = 1280; Height = 800; WindowState = WindowState.Normal;
+                // Width = 1280; Height = 800; WindowState = WindowState.Normal;
                 // Optional fullscreen setelah delay:
                 // await Task.Delay(800); WindowState = WindowState.Maximized;
             }
@@ -239,6 +301,26 @@ namespace GameHubDesktop
             try
             {
                 var json = e.WebMessageAsJson;
+                
+                // Fast path: handle JsLog (forwarded console.log/warn/error from JS)
+                if (json.Contains("\"JsLog\"", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("type", out var typeEl) && typeEl.GetString() == "JsLog")
+                        {
+                            var level = root.TryGetProperty("level", out var lvlEl) ? lvlEl.GetString()?.ToUpper() ?? "LOG" : "LOG";
+                            var message = root.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "" : "";
+                            if (message.Length > 300) message = message.Substring(0, 300) + "...";
+                            Console.WriteLine($"  [JS-{level}] {message}");
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+
                 var msg = JsonSerializer.Deserialize<DesktopMessage>(json);
                 
                 if (msg == null || string.IsNullOrWhiteSpace(msg.action)) return;
@@ -248,7 +330,11 @@ namespace GameHubDesktop
                 {
                     try
                     {
-                        var text = msg.payload.TryGetProperty("message", out var m) ? (m.GetString() ?? m.ToString()) : null;
+                        var text = string.Empty;
+                        if (msg.payload.ValueKind != System.Text.Json.JsonValueKind.Undefined && msg.payload.TryGetProperty("message", out var m))
+                        {
+                            text = m.GetString() ?? m.ToString();
+                        }
                         if (!string.IsNullOrWhiteSpace(text)) _appLog.Append(text);
                     }
                     catch { }
@@ -273,6 +359,30 @@ namespace GameHubDesktop
 
                 switch (msg.action)
                 {
+                    case "GetSteamGuardCode":
+                    {
+                        var email = string.Empty;
+                        if (msg.payload.ValueKind != System.Text.Json.JsonValueKind.Undefined && msg.payload.TryGetProperty("email", out var v))
+                        {
+                            email = v.GetString() ?? v.ToString();
+                        }
+                        _appLog.Append($"GetSteamGuardCode requested for email: {email}");
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            string result = await Services.SteamGuardService.FetchLatestSteamGuardCodeAsync(email);
+                            
+                            // Send result back to Javascript
+                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                            {
+                                SendToJs(new
+                                {
+                                    type = "SteamGuardCodeResult",
+                                    code = result
+                                });
+                            }, System.Windows.Threading.DispatcherPriority.Normal);
+                        });
+                        break;
+                    }
                     case "AddGame":
                     {
                         var appid = msg.payload.TryGetProperty("appid", out var v) ? (v.GetString() ?? v.ToString()) : string.Empty;
@@ -636,6 +746,36 @@ namespace GameHubDesktop
                         }
                         break;
                     }
+                    case "GetPopularGamesData":
+                    {
+                        try
+                        {
+                            var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
+                            var data = await Services.HomeDataService.GetPopularGamesAsync(forceRefresh);
+                            SendToJs(new { type = "PopularGamesData", data = data });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetPopularGamesData error: {ex.Message}");
+                            SendToJs(new { type = "PopularGamesData", data = (object?)null, error = ex.Message });
+                        }
+                        break;
+                    }
+                    case "GetNewFixGamesData":
+                    {
+                        try
+                        {
+                            var forceRefresh = msg.payload.TryGetProperty("forceRefresh", out var fr) && fr.ValueKind == JsonValueKind.True;
+                            var data = await Services.HomeDataService.GetNewFixGamesAsync(forceRefresh);
+                            SendToJs(new { type = "NewFixGamesData", data = data });
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"GetNewFixGamesData error: {ex.Message}");
+                            SendToJs(new { type = "NewFixGamesData", data = (object?)null, error = ex.Message });
+                        }
+                        break;
+                    }
                     case "ClearAllCache":
                     {
                         _appLog.Append("ClearAllCache requested");
@@ -643,6 +783,7 @@ namespace GameHubDesktop
                         {
                             Services.GitHubRawService.ClearCache();
                             Services.AppliedStateStore.ClearAll();
+                            Services.HomeDataService.ClearCache();
                             _appLog.Append("Cache cleared");
                             SendToJs(new { type = "ClearAllCacheResult", success = true, message = "Semua cache berhasil dihapus" });
                         }
@@ -1691,6 +1832,6 @@ namespace GameHubDesktop
     public class DesktopMessage
     {
         public string? action { get; set; }
-        public JsonElement payload { get; set; }
+        public System.Text.Json.JsonElement payload { get; set; }
     }
 }

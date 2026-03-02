@@ -225,7 +225,7 @@
         }
         const timeout = setTimeout(() => {
           reject(new Error('getRawDataset timeout'));
-        }, 300000); // 5 minutes timeout for large dataset
+        }, 45000); // 45 seconds timeout
         
         let resolved = false;
         const handler = (evt) => {
@@ -274,7 +274,7 @@
         }
         const timeout = setTimeout(() => {
           reject(new Error('getFixGamesData timeout'));
-        }, 120000); // 2 minutes timeout
+        }, 30000); // 30 seconds timeout
         
         let resolved = false;
         const handler = (evt) => {
@@ -314,7 +314,91 @@
         api.send('GetFixGamesData', { forceRefresh });
       });
     },
-    // Get steam games data from C# (cached on disk)
+    async getPopularGamesData(forceRefresh = false) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          reject(new Error('getPopularGamesData timeout'));
+        }, 30000); // 30 seconds timeout
+        
+        let resolved = false;
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            
+            if (data?.type === 'PopularGamesData') {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                try {
+                  window.chrome.webview.removeEventListener('message', handler);
+                } catch (e) {}
+                resolve(data.data);
+              }
+            }
+          } catch (e) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try {
+                window.chrome.webview.removeEventListener('message', handler);
+              } catch (err) {}
+              reject(e);
+            }
+          }
+        };
+        
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetPopularGamesData', { forceRefresh });
+      });
+    },
+    async getNewFixGamesData(forceRefresh = false) {
+      return new Promise((resolve, reject) => {
+        if (!hasWebView) {
+          reject(new Error('WebView2 not available'));
+          return;
+        }
+        const timeout = setTimeout(() => {
+          reject(new Error('getNewFixGamesData timeout'));
+        }, 30000); // 30 seconds timeout
+        
+        let resolved = false;
+        const handler = (evt) => {
+          try {
+            const msg = evt?.data || evt;
+            const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+            
+            if (data?.type === 'NewFixGamesData') {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                try {
+                  window.chrome.webview.removeEventListener('message', handler);
+                } catch (e) {}
+                resolve(data.data);
+              }
+            }
+          } catch (e) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeout);
+              try {
+                window.chrome.webview.removeEventListener('message', handler);
+              } catch (err) {}
+              reject(e);
+            }
+          }
+        };
+        
+        window.chrome.webview.addEventListener('message', handler);
+        api.send('GetNewFixGamesData', { forceRefresh });
+      });
+    },
+    // Get steam games data from C# (optional, cached on disk)
     async getSteamGamesData(forceRefresh = false, progressCallback = null) {
       return new Promise((resolve, reject) => {
         if (!hasWebView) {
@@ -323,7 +407,7 @@
         }
         const timeout = setTimeout(() => {
           reject(new Error('getSteamGamesData timeout'));
-        }, 120000); // 2 minutes timeout
+        }, 30000); // 30 seconds timeout
         
         let resolved = false;
         const handler = (evt) => {

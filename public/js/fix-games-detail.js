@@ -110,7 +110,7 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
       
       // Fallback: load from GitHub
       if (!gameData) {
-        const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
+        const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
         try {
           const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
           if (response.ok) {
@@ -177,8 +177,40 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
     // Render based on category
     if (isSteamAccount) {
       renderSteamAccountDetail(gameData);
+      
+      // Auto-show Notifikasi Peringatan jika Steam Guard aktif
+      if (gameData.dapatkan_kode) {
+         if (typeof window.showPremiumModal === 'function') {
+            setTimeout(() => {
+              window.showPremiumModal({
+                title: '⚠️ PERHATIAN!',
+                message: '• Akun ini adalah akun sharing.\n• Saat login, wajib centang opsi "Remember Me / Ingat Saya" agar akun tidak perlu melakukan verifikasi kode ulang di kemudian hari.\n• Mohon untuk membaca dan mengikuti seluruh instruksi yang tertera pada halaman ini dengan teliti sebelum melanjutkan proses login.\n• Terima kasih atas kerja samanya.',
+                type: 'warning',
+                confirmText: 'SAYA MENGERTI'
+              });
+            }, 300); // Slight delay for smoother rendering
+         } else {
+            alert('⚠️ PERHATIAN!\n\n• Akun ini adalah akun sharing.\n• Saat login, wajib centang opsi "Remember Me / Ingat Saya" agar akun tidak perlu melakukan verifikasi kode ulang di kemudian hari.\n• Mohon untuk membaca dan mengikuti seluruh instruksi yang tertera pada halaman ini dengan teliti sebelum melanjutkan proses login.\n• Terima kasih atas kerja samanya.');
+         }
+      }
     } else {
       renderFixGameDetail(gameData);
+      
+      // Auto-show Notifikasi Peringatan jika Aktivasi Offline aktif
+      if (gameData.aktivasi_offline) {
+         if (typeof window.showPremiumModal === 'function') {
+            setTimeout(() => {
+              window.showPremiumModal({
+                title: '⚠️ AKTIVASI OFFLINE',
+                message: '• Mohon dibaca sebelum melanjutkan!\n• Game ini memerlukan aktivasi offline dan mengharuskan Anda untuk menonaktifkan Windows Update terlebih dahulu.\n• Silakan download dan gunakan tools Windows Disable Update.\n• Setelah Windows Update berhasil dinonaktifkan, lanjutkan proses fix seperti biasa.\n• Setelah proses fix selesai, segera hubungi Admin melalui WhatsApp untuk melanjutkan proses aktivasi offline.',
+                type: 'warning',
+                confirmText: 'SAYA MENGERTI'
+              });
+            }, 300);
+         } else {
+            alert('⚠️ AKTIVASI OFFLINE\n\n• Mohon dibaca sebelum melanjutkan!\n• Game ini memerlukan aktivasi offline dan mengharuskan Anda untuk menonaktifkan Windows Update terlebih dahulu.\n• Silakan download dan gunakan tools Windows Disable Update.\n• Setelah Windows Update berhasil dinonaktifkan, lanjutkan proses fix seperti biasa.\n• Setelah proses fix selesai, segera hubungi Admin melalui WhatsApp untuk melanjutkan proses aktivasi offline.');
+         }
+      }
     }
   } catch (e) {
     alert('Gagal memuat detail game!');
@@ -988,7 +1020,7 @@ function renderSteamAccountDetail(game) {
   // Update AppID
   const appid = document.getElementById('fix-detail-appid');
   if (appid) {
-    appid.textContent = `AppID: ${game.appid}`;
+    appid.innerHTML = `AppID: ${game.appid} ${game.dapatkan_kode ? '<span class="ml-3 bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-wider relative -top-[1px]">STEAM GUARD</span>' : ''}`;
   }
   
   // Create account info section
@@ -1039,22 +1071,115 @@ function renderSteamAccountDetail(game) {
       </div>
       
       <div>
-        <h3 class="text-lg font-semibold mb-3">Instruksi Penggunaan</h3>
-        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-4">
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p class="text-gray-300 text-sm leading-relaxed">
               Jika akun tidak berhasil login harap segera hubungi admin!!
             </p>
             <button onclick="reportSteamAccountIssue()"
-                    class="px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-400/30 text-sm font-semibold text-blue-200 hover:bg-blue-500/30 transition">
+                    class="px-4 py-2 rounded-lg bg-blue-500/20 border border-blue-400/30 text-sm font-semibold text-blue-200 hover:bg-blue-500/30 transition shadow-md shadow-blue-500/20">
               Laporkan Akun
             </button>
           </div>
         </div>
+        <h3 class="text-lg font-semibold mb-3">Instruksi Penggunaan</h3>
+        ${game.dapatkan_kode ? `
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg pb-2 mb-6 shadow-lg overflow-hidden">
+          <div class="bg-blue-600/20 px-4 py-3 border-b border-blue-500/30 flex items-center gap-2 mb-5">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span class="text-blue-400 font-bold text-sm tracking-wide">⚠️ Mohon Dibaca Sampai Tuntas Demi Kenyamanan Bersama</span>
+          </div>
+          
+          <div class="space-y-6 px-5 pb-4 text-sm text-gray-300">
+            <!-- 1. Login ke Akun Steam -->
+            <div>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">1️⃣</span>
+                <h4 class="font-bold text-white text-base">Login ke Akun Steam</h4>
+              </div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
+                <li>Login menggunakan username dan password yang sudah disediakan (copy–paste).</li>
+                <li>Wajib centang <span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-medium">“Remember Me / Ingat Saya”</span> agar tidak perlu verifikasi ulang.</li>
+                <li>Silakan ambil kode verifikasi melalui tombol “Dapatkan Kode” yang telah disediakan.</li>
+              </ul>
+              <div class="mt-4 ml-8 bg-[#1a1a1a] p-3 rounded-xl border border-blue-500/30 flex items-center justify-between shadow-inner">
+                 <span class="text-xs text-blue-300 font-medium">Butuh kode Steam Guard untuk login?</span>
+                 <button onclick="window.getSteamGuardCode('${escapeHtml(game.username || '')}')" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(37,99,235,0.4)]">
+                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                   Dapatkan Kode
+                 </button>
+              </div>
+            </div>
+
+            <!-- 2. Install Game -->
+            <div>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">2️⃣</span>
+                <h4 class="font-bold text-white text-base">Install Game</h4>
+              </div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
+                <li>Jika game belum terpasang, silakan install terlebih dahulu.</li>
+                <li>Bisa diinstall langsung dari akun ini, atau dari akun yang sudah Anda tambahkan gamenya melalui tools yang tersedia.</li>
+              </ul>
+            </div>
+
+            <!-- 3. Jalankan Game -->
+            <div>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">3️⃣</span>
+                <h4 class="font-bold text-white text-base">Jalankan Game</h4>
+              </div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
+                <li>Buka (Play) game tersebut.</li>
+                <li>Tunggu sampai muncul logo Game Tersebut.</li>
+              </ul>
+            </div>
+
+            <!-- 4. Keluar dari Game -->
+            <div>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">4️⃣</span>
+                <h4 class="font-bold text-white text-base">Keluar dari Game</h4>
+              </div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
+                <li>Setelah logo Game tersebut muncul, segera keluar dari game.</li>
+                <li>Gunakan <kbd class="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded border border-gray-700 text-xs font-mono">Alt + F4</kbd> untuk keluar dengan cepat.</li>
+              </ul>
+            </div>
+
+            <!-- 5. PENTING Offline Mode -->
+            <div class="bg-red-500/10 border-l-4 border-red-500 border-t border-r border-b border-red-500/20 rounded-r-lg p-4 ml-2 shadow-lg shadow-red-500/5">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">5️⃣</span>
+                <h4 class="font-bold text-red-400 text-base">⚠️ PENTING – Aktifkan Offline Mode</h4>
+              </div>
+              <ul class="list-disc list-outside ml-7 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Setelah keluar dari game, <strong>WAJIB ubah Steam ke OFFLINE MODE</strong> dari akun ini.</li>
+                <li>Pastikan benar-benar sudah dalam mode offline sebelum melanjutkan.</li>
+              </ul>
+            </div>
+
+            <!-- 6. Mainkan Game -->
+            <div>
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">6️⃣</span>
+                <h4 class="font-bold text-white text-base">Mainkan Game</h4>
+              </div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
+                <li>Jalankan kembali game dari akun tersebut.</li>
+                <li><span class="text-yellow-400 font-semibold">Catatan:</span> Karena ini akun sharing, game hanya bisa dijalankan dari akun ini dan <span class="text-red-300">tidak dapat dimainkan dari akun pribadi Anda</span>.</li>
+              </ul>
+            </div>
+            
+          </div>
+        </div>
+        ` : `
         <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-4 mb-4">
           <p class="text-green-400 font-semibold mb-3">Jika berhasil Login ikuti instruksi dibawah ini:</p>
           <ol class="text-gray-300 text-sm space-y-2.5 list-decimal list-inside leading-relaxed">
-            <li>Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</li>
+            <li class="flex flex-col gap-2">
+              <span>Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</span>
+            </li>
             <li>Cek apakah ada game yang sesuai di library akun tersebut.</li>
             <li>Jika ada game, logout dan kembali ke akun pribadi kalian.</li>
             <li>Add game tersebut ke library akun pribadi kalian terlebih dahulu.</li>
@@ -1070,6 +1195,7 @@ function renderSteamAccountDetail(game) {
             <li>Mainkan game dari akun pribadi kalian seperti biasa.</li>
           </ol>
         </div>
+        `}
       </div>
     `;
     
@@ -1502,6 +1628,100 @@ async function createDesktopShortcut(exePath, shortcutName, gamePath) {
 
 // Expose globally
 window.initFixGameDetailPage = initFixGameDetailPage;
+
+// Handler for fetching Steam Guard code from Desktop Bridge
+window.getSteamGuardCode = async function(emailPencarian) {
+  // --- Create & Show Loading Overlay ---
+  const loaderId = 'steam-guard-loader-overlay';
+  let loader = document.getElementById(loaderId);
+  if (!loader) {
+    loader = document.createElement('div');
+    loader.id = loaderId;
+    loader.className = 'fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm opacity-0 transition-opacity duration-300 pointer-events-none';
+    loader.innerHTML = `
+      <div class="bg-[#151515] border border-blue-500/30 rounded-xl p-8 max-w-sm w-full mx-4 shadow-[0_0_40px_rgba(37,99,235,0.15)] flex flex-col items-center transform scale-95 transition-transform duration-300">
+        <div class="relative w-16 h-16 mb-6">
+          <div class="absolute inset-0 rounded-full border-4 border-white/5"></div>
+          <div class="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
+          <svg class="absolute inset-0 m-auto w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+        </div>
+        <h3 class="text-white font-bold text-lg text-center shadow-black drop-shadow-md">Mendapatkan Kode</h3>
+      </div>
+    `;
+    document.body.appendChild(loader);
+  }
+  
+  // Animate in
+  setTimeout(() => {
+    loader.classList.remove('opacity-0', 'pointer-events-none');
+    loader.classList.add('opacity-100', 'pointer-events-auto');
+    if(loader.children[0]) loader.children[0].classList.replace('scale-95', 'scale-100');
+  }, 10);
+
+  const hideLoader = () => {
+    const l = document.getElementById(loaderId);
+    if (l) {
+      l.classList.remove('opacity-100', 'pointer-events-auto');
+      l.classList.add('opacity-0', 'pointer-events-none');
+      if(l.children[0]) l.children[0].classList.replace('scale-100', 'scale-95');
+    }
+  };
+  // ------------------------------------
+
+  try {
+    if (window.desktopBridge && typeof window.desktopBridge.send === 'function') {
+      const gTimeout = setTimeout(() => {
+         hideLoader();
+         alert('Gagal mengambil kode Steam Guard (Timeout, pastikan IMAP App Password valid/Aktif)');
+      }, 30000);
+
+      const handler = (msg) => {
+        try {
+          const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+          if (data && data.type === 'SteamGuardCodeResult') {
+            clearTimeout(gTimeout);
+            window.desktopBridge.offMessage(handler);
+            hideLoader();
+            
+            if (data.code && !data.code.includes('Gagal')) {
+               // Tampilkan Steam Guard Custom UI
+               const modal = document.getElementById('steam-guard-modal');
+               const btn = document.getElementById('steam-guard-code-btn');
+               
+               if (modal && btn) {
+                   // Setup dataset for copy action revert
+                   btn.dataset.code = data.code;
+                   btn.innerText = data.code;
+                   
+                   // Show modal logic
+                   modal.classList.remove('opacity-0', 'pointer-events-none');
+                   modal.classList.add('opacity-100', 'pointer-events-auto');
+                   modal.children[0].classList.replace('scale-95', 'scale-100');
+               } else {
+                   // Fallback jika dom belum siap
+                   alert('🎉 KODE STEAM GUARD: \n\n' + data.code);
+               }
+            } else {
+               alert('Terdapat masalah saat mencari kode terbaru di Inbox:\n\n' + (data.code || 'Tidak ada/NotFound'));
+            }
+          }
+        } catch(e) {}
+      };
+      
+      window.desktopBridge.onMessage(handler);
+      window.desktopBridge.send('GetSteamGuardCode', { email: emailPencarian });
+      
+    } else {
+      setTimeout(() => {
+        hideLoader();
+        alert('TIDAK ADA KONEKSI KE DESKTOP BRIDGE (GameHub.exe Backend).');
+      }, 1000);
+    }
+  } catch (err) {
+    hideLoader();
+    alert('Gagal mengambil kode: ' + err.message);
+  }
+};
 window.startFixGameProcess = startFixGameProcess;
 window.startAddShortcutProcess = startAddShortcutProcess;
 window.onFixPathChooseManual = onFixPathChooseManual;

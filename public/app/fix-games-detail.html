@@ -1,9 +1,17 @@
 <div class="space-y-6">
   <!-- BACK BUTTON -->
-  <button onclick="navigate('fix-games')" 
-    class="flex items-center gap-2 text-gray-400 hover:text-white transition mb-4">
+  <button
+    id="fix-detail-back-btn"
+    onclick="navigate(window._lastNavigateParams?.source || 'fix-games')"
+    class="flex items-center gap-2 text-gray-400 hover:text-white transition mb-4"
+  >
     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        d="M15 19l-7-7 7-7"
+      ></path>
     </svg>
     <span>Kembali ke Fix Games</span>
   </button>
@@ -13,99 +21,148 @@
     <div class="flex flex-col lg:flex-row gap-8">
       <!-- POSTER -->
       <div class="flex-shrink-0">
-        <img id="fix-detail-poster" 
-             src="" 
-             alt=""
-             class="w-64 h-96 object-cover rounded-lg border border-white/5 shadow-lg"
-             onerror="this.onerror=null;this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';">
+        <img
+          id="fix-detail-poster"
+          src=""
+          alt=""
+          class="w-64 h-96 object-cover rounded-lg border border-white/5 shadow-lg"
+          onerror="
+            this.onerror = null;
+            this.src =
+              'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
+          "
+        />
       </div>
-      
+
       <!-- INFO -->
       <div class="flex-1 space-y-6">
         <!-- TITLE & PREMIUM BADGE -->
         <div>
           <div class="flex items-center gap-3 mb-2">
             <h1 id="fix-detail-title" class="text-4xl font-bold">Loading...</h1>
-            <span id="fix-detail-premium-badge" class="text-xs px-3 py-1 rounded font-semibold hidden"></span>
+            <span
+              id="fix-detail-premium-badge"
+              class="text-xs px-3 py-1 rounded font-semibold hidden"
+            ></span>
           </div>
           <p id="fix-detail-publisher" class="text-xl text-gray-400"></p>
           <p id="fix-detail-appid" class="text-sm text-gray-500 mt-2"></p>
         </div>
-        
+
         <!-- IMPORTANT INFO (Hidden for Steam Account category) -->
         <div id="fix-important-info" class="space-y-3">
           <h3 class="text-lg font-semibold">Informasi Penting</h3>
-          
+
           <!-- Antivirus Warning -->
-          <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+          <div
+            class="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4"
+          >
             <div class="flex items-start gap-3">
               <div class="text-yellow-400 text-xl">⚠️</div>
               <div>
                 <h4 class="text-yellow-400 font-semibold mb-1">Antivirus</h4>
                 <p class="text-gray-300 text-sm leading-relaxed">
-                  Untuk hasil terbaik, gunakan <span class="font-semibold text-white">Windows Defender</span> saja. 
-                  Jika Anda menggunakan antivirus lain, sebaiknya <span class="font-semibold text-white">uninstall</span> terlebih dahulu 
-                  dan aktifkan Windows Defender agar proses fix berjalan dengan sempurna.
+                  Untuk hasil terbaik, gunakan
+                  <span class="font-semibold text-white">Windows Defender</span>
+                  saja. Jika Anda menggunakan antivirus lain, sebaiknya
+                  <span class="font-semibold text-white">uninstall</span>
+                  terlebih dahulu dan aktifkan Windows Defender agar proses fix
+                  berjalan dengan sempurna.
                 </p>
               </div>
             </div>
           </div>
-          
+
           <!-- Tutorial Info -->
           <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
             <div class="flex items-start gap-3">
               <div class="text-blue-400 text-xl">📖</div>
               <div>
-                  <h4 class="text-blue-400 font-semibold mb-1">Windows Update</h4>
-                  <p class="text-gray-300 text-sm leading-relaxed mb-3">
-                      Setelah Windows Update, game harus melalui <span class="font-semibold text-white">"Proses Fix Ulang"</span>. Jika ingin bebas dari <span class="font-semibold text-white">"Proses Fix Selamanya"</span>, disarankan nonaktifkan Windows Update - juga bisa menghemat ruang penyimpanan.
-                  </p>
-                  <p class="text-gray-300 text-sm leading-relaxed">
-                      📥 <strong>Download Tool:</strong> <a href="https://drive.google.com/uc?export=download&id=1aWMeHqFrLQvbTFQO2YrVedGny6PQ2HAE" target="_blank" class="font-semibold text-blue-400 hover:underline">Windows Disable Update</a>
-                  </p>
+                <h4 class="text-blue-400 font-semibold mb-1">Windows Update</h4>
+                <p class="text-gray-300 text-sm leading-relaxed mb-3">
+                  Setelah Windows Update, game harus melalui
+                  <span class="font-semibold text-white"
+                    >"Proses Fix Ulang"</span
+                  >. Jika ingin bebas dari
+                  <span class="font-semibold text-white"
+                    >"Proses Fix Selamanya"</span
+                  >, disarankan nonaktifkan Windows Update - juga bisa menghemat
+                  ruang penyimpanan.
+                </p>
+                <p class="text-gray-300 text-sm leading-relaxed">
+                  📥 <strong>Download Tool:</strong>
+                  <a
+                    href="https://drive.google.com/uc?export=download&id=1aWMeHqFrLQvbTFQO2YrVedGny6PQ2HAE"
+                    target="_blank"
+                    class="font-semibold text-blue-400 hover:underline"
+                    >Windows Disable Update</a
+                  >
+                </p>
               </div>
             </div>
           </div>
-          
+
           <!-- Error Report Info -->
           <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
             <div class="flex items-start gap-3">
               <div class="text-red-400 text-xl">🐛</div>
               <div>
-                <h4 class="text-red-400 font-semibold mb-1">Laporkan Masalah</h4>
+                <h4 class="text-red-400 font-semibold mb-1">
+                  Laporkan Masalah
+                </h4>
                 <p class="text-gray-300 text-sm leading-relaxed">
-                  Jika Anda menemukan <span class="font-semibold text-white">error</span> atau <span class="font-semibold text-white">bug</span> selama proses fix, 
-                  harap segera <span class="font-semibold text-white">laporkan</span> kepada admin agar dapat ditangani dengan cepat.
+                  Jika Anda menemukan
+                  <span class="font-semibold text-white">error</span> atau
+                  <span class="font-semibold text-white">bug</span> selama
+                  proses fix, harap segera
+                  <span class="font-semibold text-white">laporkan</span> kepada
+                  admin agar dapat ditangani dengan cepat.
                 </p>
               </div>
             </div>
           </div>
         </div>
-        
+
         <!-- ACTION BUTTON (Hidden for Steam Account category) -->
         <div id="fix-action-button" class="pt-4 border-t border-white/5">
           <div class="flex flex-col sm:flex-row gap-3">
-            <button id="fix-game-start-btn" 
+            <button
+              id="fix-game-start-btn"
               onclick="startFixGameProcess()"
-              class="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg font-semibold text-lg transition shadow-lg hover:shadow-blue-500/50 flex items-center justify-center gap-3">
+              class="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg font-semibold text-lg transition shadow-lg hover:shadow-blue-500/50 flex items-center justify-center gap-3"
+            >
               <span id="fix-btn-text">🛠️ Mulai Proses Fix</span>
-              <div id="fix-btn-spinner" class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              <div
+                id="fix-btn-spinner"
+                class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+              ></div>
             </button>
-            
-            <button id="fix-game-add-shortcut-btn" 
+
+            <button
+              id="fix-game-add-shortcut-btn"
               onclick="startAddShortcutProcess()"
-              class="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 rounded-lg font-semibold text-lg transition shadow-lg hover:shadow-green-500/50 flex items-center justify-center gap-3">
+              class="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 rounded-lg font-semibold text-lg transition shadow-lg hover:shadow-green-500/50 flex items-center justify-center gap-3"
+            >
               <span id="fix-shortcut-btn-text">📌 Add Shortcut</span>
-              <div id="fix-shortcut-btn-spinner" class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              <div
+                id="fix-shortcut-btn-spinner"
+                class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"
+              ></div>
             </button>
           </div>
-          
+
           <!-- SIMPLE PROGRESS (Hidden by default) -->
           <div id="fix-progress-container" class="hidden mt-4">
             <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
-              <div id="fix-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+              <div
+                id="fix-progress-bar"
+                class="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style="width: 0%"
+              ></div>
             </div>
-            <p id="fix-progress-text" class="text-sm text-gray-400 text-center">Memproses...</p>
+            <p id="fix-progress-text" class="text-sm text-gray-400 text-center">
+              Memproses...
+            </p>
           </div>
         </div>
       </div>
@@ -113,24 +170,44 @@
   </div>
 
   <!-- MANUAL PATH MODAL -->
-  <div id="fix-path-modal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60">
-    <div class="bg-[#151515] border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-5">
+  <div
+    id="fix-path-modal"
+    class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60"
+  >
+    <div
+      class="bg-[#151515] border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 space-y-5"
+    >
       <div class="flex items-start gap-3">
         <div class="mt-1 text-blue-400">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" />
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
+            />
           </svg>
         </div>
         <div class="space-y-2">
           <h3 class="text-lg font-semibold text-white">
             Game Belum Terpasang / Tidak Ditemukan
           </h3>
-          <p id="fix-path-modal-message" class="text-sm text-gray-300 leading-relaxed">
-            Game ini belum terdeteksi di Steam library Anda. Anda bisa memilih folder instalasi game secara manual,
-            atau kembali dulu dan pastikan game sudah terinstall di Steam.
+          <p
+            id="fix-path-modal-message"
+            class="text-sm text-gray-300 leading-relaxed"
+          >
+            Game ini belum terdeteksi di Steam library Anda. Anda bisa memilih
+            folder instalasi game secara manual, atau kembali dulu dan pastikan
+            game sudah terinstall di Steam.
           </p>
-          <div class="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs text-gray-300 space-y-1">
+          <div
+            class="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-xs text-gray-300 space-y-1"
+          >
             <p class="font-semibold text-white/80">Tips Lokasi Folder Game</p>
             <p>
               Biasanya terletak di:
@@ -143,14 +220,18 @@
       </div>
 
       <div class="flex flex-col sm:flex-row gap-3 justify-end pt-2">
-        <button id="fix-path-cancel-btn"
-                onclick="onFixPathCancel()"
-                class="w-full sm:w-auto px-5 py-2.5 rounded-lg border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition">
+        <button
+          id="fix-path-cancel-btn"
+          onclick="onFixPathCancel()"
+          class="w-full sm:w-auto px-5 py-2.5 rounded-lg border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition"
+        >
           Belum Install / Kembali
         </button>
-        <button id="fix-path-choose-btn"
-                onclick="onFixPathChooseManual()"
-                class="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-sm font-semibold text-white shadow-lg hover:from-blue-400 hover:to-blue-500 hover:shadow-blue-500/40 transition">
+        <button
+          id="fix-path-choose-btn"
+          onclick="onFixPathChooseManual()"
+          class="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 text-sm font-semibold text-white shadow-lg hover:from-blue-400 hover:to-blue-500 hover:shadow-blue-500/40 transition"
+        >
           Pilih Folder Game Manual
         </button>
       </div>
@@ -163,9 +244,11 @@
 
 <style>
   #fix-detail-poster {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition:
+      transform 0.3s ease,
+      box-shadow 0.3s ease;
   }
-  
+
   #fix-detail-poster:hover {
     transform: scale(1.02);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);

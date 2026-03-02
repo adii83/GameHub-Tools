@@ -46,7 +46,7 @@
         if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
           json = await window.desktopBridge.getSteamGamesData(false); // false = check expired, load fresh if needed
         } else {
-          const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
+          const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
           const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
           if (response.ok) {
             json = await response.json();
@@ -236,6 +236,15 @@
   // Initialize Fix Games page
   async function initFixGamesPage() {
     try {
+      // Perbaikan Bug SPA - Sinkronkan UI Active Tab dengan currentCategory memory
+      document.querySelectorAll('[id^="fix-category-"]').forEach(btn => {
+        btn.classList.remove('active-category');
+      });
+      const activeTab = document.getElementById(`fix-category-${currentCategory}`);
+      if (activeTab) {
+        activeTab.classList.add('active-category');
+      }
+
       // OPTIMASI: Cek cache dulu sebelum load data
       // Untuk kategori "all", skip cache karena perlu merge dengan Steam Account data
       // Hanya gunakan cache jika kategori adalah kategori fix games lainnya (bukan steam-account dan bukan all)
@@ -595,6 +604,7 @@
           <div class="absolute top-2 left-2 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">
             ${premiumLabel}
           </div>
+          ${game.aktivasi_offline ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">AKTIVASI OFFLINE</div>` : (game.dapatkan_kode === true ? `<div class="absolute top-2 left-20 bg-purple-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">STEAM GUARD</div>` : '')}
           <div class="fix-game-card-overlay">
             <div class="fix-game-card-title text-white">${escapeHtml(game.title || 'Unknown')}</div>
             <div class="fix-game-card-publisher">${escapeHtml(game.publisher || '')}</div>

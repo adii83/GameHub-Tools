@@ -1,8 +1,257 @@
-<section class="relative flex min-h-[70vh] items-center justify-center overflow-hidden rounded-[48px] border border-white/10 bg-[#05050a] p-10 text-center shadow-[0_40px_120px_rgba(2,6,23,.6)]">
-	<div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(circle at 30% 20%, rgba(255,255,255,.08), transparent 55%), radial-gradient(circle at 70% 80%, rgba(120,61,255,.15), transparent 60%), radial-gradient(circle at 10% 80%, rgba(82,212,255,.1), transparent 55%);"></div>
-	<div class="relative z-10 space-y-4">
-		<p class="text-sm uppercase tracking-[0.8em] text-white/40">Welcome to</p>
-		<h1 class="text-5xl md:text-6xl font-black text-white tracking-tight">GameHub</h1>
-		<p class="text-lg md:text-2xl font-light text-white/70">Game Station</p>
-	</div>
-</section>
+<div class="flex items-center justify-between mb-8">
+  <div class="space-y-1">
+    <h1
+      class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60"
+    >
+      Home
+    </h1>
+    <p class="text-sm font-medium text-white/40 tracking-wide uppercase">
+      Discover What's New & Popular
+    </p>
+  </div>
+</div>
+
+<div class="space-y-12 pb-8">
+  <!-- SECTION: NEW FIX GAMES ADDED -->
+  <section class="relative">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-xl font-bold flex items-center gap-2">
+        <span class="w-1.5 h-6 rounded-full bg-blue-500"></span>
+        New Fix Games
+      </h2>
+      <button
+        onclick="navigate('fix-games')"
+        class="text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-1"
+      >
+        Lihat Semua
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5l7 7-7 7"
+          ></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Horizon Scroll Area -->
+    <div class="relative group">
+      <!-- Left scroll button -->
+      <button
+        onclick="scrollHomeSlider('left')"
+        class="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/80 border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0 hover:bg-white/10 shadow-xl backdrop-blur-sm -ml-4"
+        id="home-slider-left"
+      >
+        <svg
+          class="w-5 h-5 pr-0.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 19l-7-7 7-7"
+          ></path>
+        </svg>
+      </button>
+
+      <!-- Slider Container -->
+      <div
+        id="home-new-fixes"
+        class="flex overflow-x-auto gap-4 scroll-smooth hide-scrollbar pb-4 pt-2 px-1 snap-x snap-mandatory premium-scroll"
+        onscroll="updateHomeSliderButtons()"
+      >
+        <!-- New Fix Game Cards will be injected here -->
+        <div
+          class="w-full flex items-center justify-center h-48 border border-white/5 rounded-2xl bg-[#151515]"
+        >
+          <div
+            class="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Right scroll button -->
+      <button
+        onclick="scrollHomeSlider('right')"
+        class="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-black/80 border border-white/10 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0 hover:bg-white/10 shadow-xl backdrop-blur-sm -mr-4"
+        id="home-slider-right"
+      >
+        <svg
+          class="w-5 h-5 pl-0.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5l7 7-7 7"
+          ></path>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- SECTION: MOST POPULAR GAMES -->
+  <section>
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-xl font-bold flex items-center gap-2">
+        <span class="w-1.5 h-6 rounded-full bg-purple-500"></span>
+        Most Popular Games
+      </h2>
+      <button
+        onclick="navigate('games')"
+        class="text-sm font-medium text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
+      >
+        Jelajahi Games
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5l7 7-7 7"
+          ></path>
+        </svg>
+      </button>
+    </div>
+
+    <div
+      id="home-popular-games"
+      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4"
+    >
+      <!-- Popular Games Cards will be injected here -->
+      <div
+        class="col-span-full flex items-center justify-center h-48 border border-white/5 rounded-2xl bg-[#151515]"
+      >
+        <div
+          class="animate-spin w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full"
+        ></div>
+      </div>
+    </div>
+
+    <!-- Load More Button -->
+    <div
+      id="home-popular-load-more-container"
+      class="mt-8 flex justify-center hidden"
+    >
+      <button
+        id="home-popular-load-more"
+        onclick="loadMorePopularGames()"
+        class="px-8 py-3 bg-[#151515] hover:bg-white/5 border border-white/10 rounded-xl font-medium text-white transition-all flex items-center gap-2 hover:border-purple-500/50"
+      >
+        <span>Tampilkan Lebih Banyak</span>
+        <svg
+          class="w-4 h-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M19 9l-7 7-7-7"
+          ></path>
+        </svg>
+      </button>
+    </div>
+  </section>
+</div>
+
+<!-- STYLES -->
+<style>
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Modern card hover effect */
+  .home-card-hover {
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .home-card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Sync exactly with Fix Games card styles */
+  .fix-game-card {
+    aspect-ratio: 2 / 3;
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  .fix-game-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .fix-game-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.9) 0%,
+      rgba(0, 0, 0, 0.7) 50%,
+      transparent 100%
+    );
+    padding: 16px;
+    padding-top: 32px;
+  }
+
+  .fix-game-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .fix-game-card-publisher {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 4px;
+  }
+</style>
+
+<!-- DETAIL MODAL (sama dengan Games list fallback modal) -->
+<div id="detail-drawer" class="fixed inset-0 z-50 hidden">
+  <div id="drawer-overlay" class="absolute inset-0 bg-black/60"></div>
+  <div
+    id="detail-drawer-panel"
+    class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[48rem] max-w-[96vw] max-h-[88vh] bg-[#151515] border border-white/10 rounded-2xl shadow-2xl p-6 opacity-0 scale-95 transition-all duration-200"
+  >
+    <div id="detail-card" class="h-full overflow-auto premium-scroll">
+      <!-- content injected -->
+    </div>
+  </div>
+</div>
+
+<script src="/js/home.js"></script>

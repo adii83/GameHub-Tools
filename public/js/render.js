@@ -45,6 +45,13 @@ function savePageCache() {
     // ignore storage errors
   }
 }
+
+window.clearRenderPageCache = function() {
+  try {
+    Object.keys(pageCache).forEach(k => delete pageCache[k]);
+    savePageCache();
+  } catch(e) {}
+};
 // --- Local Steam data merge helpers ---
 // Load override data: combines built-in + global override (from GitHub) + user override (local)
 // Priority: User Override > Global Override > Built-in Override > Raw Data
@@ -420,7 +427,7 @@ function getBuiltCache() {
 
 // Normalize games array and prepare originalData + pageCache
 // PERBAIKAN: Batch processing untuk tidak block UI, terutama saat aplikasi di background
-async function normalizeAndPrepareGames(arr, shuffle = true) {
+async function normalizeAndPrepareGames(arr, shuffle = true, updateGlobal = true) {
   try {
     if (!Array.isArray(arr)) return [];
     
@@ -448,8 +455,8 @@ async function normalizeAndPrepareGames(arr, shuffle = true) {
           } else {
             copy.protection = null; // Unknown/null = non-denuvo (default)
           }
-          // tier based on price threshold 350000
-          copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
+          // tier based on price threshold 130000
+          copy.tier = (copy.price_normalized >= 130000) ? 'premium' : 'standard';
           return copy;
         });
         out = out.concat(normalizedBatch);
@@ -480,7 +487,7 @@ async function normalizeAndPrepareGames(arr, shuffle = true) {
         } else {
           copy.protection = null;
         }
-        copy.tier = (copy.price_normalized >= 350000) ? 'premium' : 'standard';
+        copy.tier = (copy.price_normalized >= 130000) ? 'premium' : 'standard';
         return copy;
       });
     }
@@ -517,28 +524,84 @@ async function normalizeAndPrepareGames(arr, shuffle = true) {
       }
     }
 
-    // assign to originalData and filteredData
-    // PERBAIKAN: Untuk array besar, defer slice untuk tidak block UI
-    if (isLarge && out.length > 10000) {
-      // Defer assignment untuk array sangat besar (yield ke event loop)
-      await new Promise(resolve => {
-        if (window.requestIdleCallback) {
-          window.requestIdleCallback(() => {
-            originalData = out.slice();
-            filteredData = originalData;
-            resolve();
-          }, { timeout: 100 });
-        } else {
-          setTimeout(() => {
-            originalData = out.slice();
-            filteredData = originalData;
-            resolve();
-          }, 0);
+    // Expose interleave function to window so filter.js can also use it
+    window.interleavePremiumStandard = function(arr, premiumCount = 13, standardCount = 7) {
+      if (!arr || arr.length === 0) return [];
+      const premiums = [];
+      const standards = [];
+      
+      // Separate the games
+      for(let i=0; i<arr.length; i++) {
+        if(arr[i].tier === 'premium') premiums.push(arr[i]);
+        else standards.push(arr[i]);
+      }
+      
+      const result = [];
+      let pIdx = 0;
+      let sIdx = 0;
+      
+      // Interleave them based on requested ratio but randomly distributed
+      while (pIdx < premiums.length || sIdx < standards.length) {
+        const chunk = [];
+        // Take up to premiumCount
+        let pTaken = 0;
+        while(pIdx < premiums.length && pTaken < premiumCount) {
+          chunk.push(premiums[pIdx++]);
+          pTaken++;
         }
-      });
-    } else {
-      originalData = out.slice();
-      filteredData = originalData;
+        
+        // Take up to standardCount 
+        let sTaken = 0;
+        while(sIdx < standards.length && sTaken < standardCount) {
+          chunk.push(standards[sIdx++]);
+          sTaken++;
+        }
+        
+        // Shuffle the chunk so premium and standard are mixed on the UI
+        for (let i = chunk.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [chunk[i], chunk[j]] = [chunk[j], chunk[i]];
+        }
+        
+        // Push the shuffled chunk to result
+        for (let i = 0; i < chunk.length; i++) {
+          result.push(chunk[i]);
+        }
+      }
+      return result;
+    };
+    
+    out = window.interleavePremiumStandard(out, 13, 7);
+
+    if (updateGlobal) {
+      // assign to originalData and filteredData
+      // PERBAIKAN: Untuk array besar, defer slice untuk tidak block UI
+      if (isLarge && out.length > 10000) {
+        // Defer assignment untuk array sangat besar (yield ke event loop)
+        await new Promise(resolve => {
+          if (window.requestIdleCallback) {
+            window.requestIdleCallback(() => {
+              originalData = out.slice();
+              filteredData = originalData;
+              // Ekspos data processed (dengan overrides + normalisasi) ke global
+              // sehingga onAddGame() dan kode lainnya bisa membaca protection yang akurat
+              window.processedOriginalData = originalData;
+              resolve();
+            }, { timeout: 100 });
+          } else {
+            setTimeout(() => {
+              originalData = out.slice();
+              filteredData = originalData;
+              window.processedOriginalData = originalData;
+              resolve();
+            }, 0);
+          }
+        });
+      } else {
+        originalData = out.slice();
+        filteredData = originalData;
+        window.processedOriginalData = originalData;
+      }
     }
 
     // prefill pageCache for stable paging (PAGE_SIZE per page)
@@ -623,8 +686,34 @@ async function initGamesPage() {
   // Load persisted page cache (if any) so navigation can be instant
   try { loadPageCache(); } catch(e) {}
   
+  // OPTIMASI UTAMA: Gunakan data yang sudah di-prefetch saat loading screen (window.originalData)
+  // Ini menghindari popup "Memuat seluruh games" saat pertama buka halaman Games
+  if (window.originalData && Array.isArray(window.originalData) && window.originalData.length > 100) {
+    try {
+      console.log('[Games] Using pre-fetched originalData, count:', window.originalData.length);
+      let arr = window.originalData;
+      arr = await mergeWithLocalDataset(arr);
+      await normalizeAndPrepareGames(arr, true);
+      filteredData = originalData.slice();
+      if (window.GamesPageCache) {
+        setTimeout(() => { try { window.GamesPageCache.set(originalData, filteredData); } catch(e) {} }, 0);
+      }
+      try { loadGenreList(originalData); } catch(e) {}
+      if (typeof window.clearRenderPageCache === 'function') {
+        window.clearRenderPageCache();
+      }
+      if (typeof applyFilters === 'function') { setTimeout(() => { try { applyFilters(true); } catch(e) {} }, 50); }
+      else { await renderPage(1); }
+      try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch(e) {}
+      return; // Done! No need to show loading overlay
+    } catch(e) {
+      console.warn('[Games] Error using pre-fetched data, fallback to normal load:', e);
+    }
+  }
+  
   // OPTIMASI: Cek cache dulu sebelum load data
   if (window.GamesPageCache && window.GamesPageCache.isValid()) {
+
     const cached = window.GamesPageCache.get();
     if (cached && cached.originalData && cached.filteredData) {
       // Restore dari cache (instant, tidak perlu loading)
@@ -636,7 +725,6 @@ async function initGamesPage() {
       }
       originalData = cached.originalData;
       // PERBAIKAN: Reset filteredData ke originalData untuk memastikan library filter tidak aktif
-      // Jangan gunakan cached.filteredData karena mungkin masih ter-filter oleh library
       filteredData = originalData.slice();
       
       // Defer loadGenreList untuk tidak block UI
@@ -646,21 +734,20 @@ async function initGamesPage() {
         } catch (e) {}
       }, 0);
       
-      // PERBAIKAN: Apply filters lagi untuk memastikan library filter tidak aktif
+      // PERBAIKAN: Hapus cache usang dari library terlebih dahulu
+      if (typeof window.clearRenderPageCache === 'function') {
+        window.clearRenderPageCache();
+      }
+
+      // PERBAIKAN: Apply filters lagi dengan render = true untuk mengeksekusi pembangunan ulang UI Games normal
       if (typeof applyFilters === 'function') {
-        // Defer apply filters untuk tidak block UI
-        setTimeout(() => {
-          try {
-            applyFilters(false); // false = jangan render lagi, karena sudah render di bawah
-          } catch (e) {
-            // Error applying filters - non-critical
-          }
-        }, 50);
+        applyFilters(true);
+      } else {
+        try { await renderPage(1); } catch (e) {}
       }
       
-      try { await renderPage(1); } catch (e) {}
       try { if (typeof updateLastUpdatedLabel === 'function') updateLastUpdatedLabel(); } catch (e) {}
-      return; // Skip loading, langsung render dari cache
+      return; // Skip loading, langsung render dari cache paska-filter
     }
   }
   

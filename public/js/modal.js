@@ -66,7 +66,7 @@ function showPremiumModal(options = {}) {
       </div>
       <div class="flex-1 min-w-0">
         <h3 class="text-xl font-bold text-white mb-2">${escapeHtml(title)}</h3>
-        <p class="text-gray-300 text-sm leading-relaxed">${escapeHtml(message)}</p>
+        <p class="text-gray-300 text-sm leading-relaxed whitespace-pre-line">${escapeHtml(message)}</p>
       </div>
       ${type !== 'confirm' ? `
         <button id="modal-close" class="flex-shrink-0 w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center text-gray-400 hover:text-white transition">

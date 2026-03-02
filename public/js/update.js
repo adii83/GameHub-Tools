@@ -30,6 +30,11 @@ async function loadGames() {
       }
     }
     // Force refresh fix games data via bridge
+    window.fixGamesData = null;
+    window.steamGamesData = null;
+    window._newFixGamesIds = null;
+    window._popularGamesIds = null;
+    
     if (window.desktopBridge && typeof window.desktopBridge.getFixGamesData === 'function') {
       try {
         await window.desktopBridge.getFixGamesData(true); // forceRefresh = true
@@ -45,6 +50,18 @@ async function loadGames() {
       } catch (e) {
         // Force refresh failed - non-critical
       }
+    }
+
+    // 2c. Force refresh home data via bridge
+    if (window.desktopBridge && typeof window.desktopBridge.getNewFixGamesData === 'function') {
+      try {
+        await window.desktopBridge.getNewFixGamesData(true);
+      } catch (e) {}
+    }
+    if (window.desktopBridge && typeof window.desktopBridge.getPopularGamesData === 'function') {
+      try {
+        await window.desktopBridge.getPopularGamesData(true);
+      } catch (e) {}
     }
     
     // 3. Steam data (raw dataset) - PERBAIKAN: Gunakan ETag check, tidak force refresh

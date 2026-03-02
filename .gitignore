@@ -1,15 +1,19 @@
-# Node modules
-node_modules/
+# ============================================================
+# GAMEHUB PROJECT - .gitignore
+# ============================================================
 
-# Logs
-logs/
-*.log
+# ============================================================
+# NODE.JS
+# ============================================================
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Build outputs
+# ============================================================
+# BUILD OUTPUTS (JS/Vite/Webpack)
+# ============================================================
 dist/
 build/
 out/
@@ -17,63 +21,139 @@ out/
 .parcel-cache/
 .vite/
 
-# Env files
-.env
-.env.*.local
-.env.local
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Editor / IDE
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.iml
-# Note: *.sln files are usually committed (removed from ignore)
-
-# C# .NET Build outputs
+# ============================================================
+# C# / .NET BUILD ARTIFACTS
+# ============================================================
+# Build output directories
 [Bb]in/
 [Oo]bj/
+
+# Compiled binaries & debug info
 *.dll
 *.exe
 *.pdb
-*.cache
+*.ilk
+*.meta
+*.coverage
+
+# C# user/machine specific files
 *.user
 *.userosscache
+*.userprefs
 *.sln.docstates
 *.suo
-*.userprefs
+*.sln.DotSettings.user
 
-# WebView2 runtime files (very large, generated at runtime)
+# ============================================================
+# NUGET PACKAGES (VERY LARGE - auto-restored on build)
+# ============================================================
+# Root-level NuGet package store (created by dotnet restore)
+pkg/
+
+# Per-project NuGet local cache
+**/.nuget_cache/
+
+# NuGet package restore files
+*.nupkg
+.nuget/
+packages/
+*.lock.json
+
+# ============================================================
+# LARGE BINARY / RUNTIME FILES
+# ============================================================
+# .NET runtime host zip files (5MB+, downloaded by SDK on build)
+*.zip
+host.zip
+microsoft.netcore.app.host.*.zip
+
+# ============================================================
+# WEBVIEW2 RUNTIME (Very large, generated at runtime)
+# ============================================================
 **/GameHubDesktop.exe.WebView2/
 **/EBWebView/
+**/GrShaderCache/
+**/GPUCache/
 
-# Visual Studio files
+# ============================================================
+# VISUAL STUDIO / RIDER / IDE
+# ============================================================
 .vs/
+.vscode/
+.idea/
 *.vsidx
 *.vspscc
 *.vsp
 *.vsscc
 *.vssscc
+*.suo
+*.ntvs*
+*.njsproj
+*.iml
+*.VC.db
+*.VC.VC.opendb
 
-# Temporary files
+# ============================================================
+# ENVIRONMENT / SECRETS (JANGAN di-upload ke GitHub!)
+# ============================================================
+.env
+.env.local
+.env.*.local
+*.secret
+secrets.json
+appsettings.Development.json
+# File konfigurasi lokal yang mungkin mengandung API key/path lokal
+api.local.json
+
+# ============================================================
+# OS FILES
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================
+# LOG & TEMPORARY FILES
+# ============================================================
+logs/
+*.log
 tmp/
 temp/
 *.tmp
+*.bak
+*.swp
+*.swo
+
+# Error dump files (file debug sementara di root project)
+build_err*.txt
+error_*.txt
+crash_*.txt
+
+# ============================================================
+# OPTIONAL (uncomment sesuai kebutuhan)
+# ============================================================
+# Lockfiles (biasanya sebaiknya di-commit untuk reproducibility)
+# package-lock.json
+# yarn.lock
 
 # Coverage
 coverage/
 .nyc_output/
 
-# Misc
+# Misc database local
 *.localstorage
 *.db
-$RECYCLE.BIN/
 
-# Optional lockfiles you may want to include/exclude depending on policy
-# package-lock.json
-# yarn.lock
+# ============================================================
+# GAMEHUB SPECIFIC - File cache/runtime yang dibuat otomatis
+# ============================================================
+# Data cache yang di-download dari GitHub saat runtime
+# (jika ada folder cache lokal)
+**/cache/
+**/.cache/

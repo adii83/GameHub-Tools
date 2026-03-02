@@ -1,49 +1,182 @@
-// Store last navigate params
-window._lastNavigateParams = {};
+// Persistent Games page container — Games page dirender sekali, disimpan di div khusus
+// sehingga event listener tetap aktif dan data tidak perlu di-load ulang
+let _gamesPageLoaded = false;   // apakah games page sudah pernah dirender
+let _currentPage = '';          // halaman yang sedang aktif
 
 async function navigate(page, params = {}) {
   // Store params for detail pages
   window._lastNavigateParams = params;
-  
-  const container = document.getElementById("app-content");
-  const sidebarDashboard = document.getElementById("nav-dashboard");
-  const sidebarGames = document.getElementById("nav-games");
-  const sidebarLibrary = document.getElementById("nav-library");
-  const sidebarFixGames = document.getElementById("nav-fix-games");
-  const sidebarSettings = document.getElementById("nav-settings");
 
-  // Load page
-  const html = await fetch(`/app/${page}.html`).then((r) => r.text());
-  // Inject HTML and ensure any inline <script> tags execute
+  const container     = document.getElementById("app-content");
+  const gamesPersist  = document.getElementById("games-page-persistent");
+  const sidebarDashboard = document.getElementById("nav-dashboard");
+  const sidebarGames     = document.getElementById("nav-games");
+  const sidebarLibrary   = document.getElementById("nav-library");
+  const sidebarFixGames  = document.getElementById("nav-fix-games");
+  const sidebarSettings  = document.getElementById("nav-settings");
+
+  // ----- GAMES PAGE: pakai persistent container -----
+  if (page === "games" && !params.forceReload) {
+    // Sembunyikan app-content, tampilkan games-page-persistent
+    if (container)     container.style.display = "none";
+    if (gamesPersist)  gamesPersist.style.display = "";
+
+    // Update sidebar active state
+    [sidebarDashboard, sidebarGames, sidebarLibrary, sidebarFixGames, sidebarSettings]
+      .forEach(el => el?.classList.remove("bg-[#1f1f1f]", "text-white"));
+    sidebarGames?.classList.add("bg-[#1f1f1f]", "text-white");
+
+    // DESTROY app-content contents to REMOVE DUPLICATE IDs (like detail-drawer, searchInput)
+    if (container) container.innerHTML = "";
+
+    if (_gamesPageLoaded) {
+      // Sudah dirender sebelumnya — langsung tampil, tidak perlu initGamesPage lagi
+      console.log('[navigate] Games page restored from persistent DOM (instant)');
+      _currentPage = "games";
+      if (typeof window.resetLibraryFilter === 'function') window.resetLibraryFilter();
+      else window.libraryFilterActive = false;
+      // Re-apply filters agar state filter tetap sinkron
+      try {
+        if (typeof applyFilters === 'function') {
+          setTimeout(() => { try { applyFilters(true); } catch(e) {} }, 100);
+        }
+      } catch(e) {}
+      return;
+    }
+
+    // Pertama kali buka Games page — muat dan render ke persistent container
+    console.log('[navigate] Games page first load into persistent container');
+    _currentPage = "games";
+    _gamesPageLoaded = false; // akan di-set true setelah selesai
+
+    // Fetch games.html dan inject ke persistent container
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10000);
+      const res = await fetch("/app/games.html", { signal: ctrl.signal });
+      clearTimeout(t);
+      const html = await res.text();
+      gamesPersist.innerHTML = html;
+    } catch(e) {
+      console.error('[navigate] Failed to load games.html:', e);
+      if (container) container.style.display = "";
+      if (gamesPersist) gamesPersist.style.display = "none";
+      return;
+    }
+
+    // Inject scripts dari games.html
+    try {
+      const temp = document.createElement('div');
+      temp.innerHTML = gamesPersist.innerHTML;
+      const scripts = temp.querySelectorAll('script');
+      scripts.forEach((old) => {
+        const s = document.createElement('script');
+        if (old.type) s.type = old.type;
+        if (old.src) {
+          const srcAttr = old.getAttribute('src');
+          const existing = document.head.querySelector(`script[src="${srcAttr}"]`);
+          if (!existing) {
+            s.src = srcAttr;
+            s.onload = () => console.log('[navigate] Games script loaded:', srcAttr);
+            document.head.appendChild(s);
+          }
+        } else {
+          s.textContent = old.textContent || '';
+          document.body.appendChild(s);
+        }
+      });
+    } catch(e) { console.error('[navigate] Games script inject error:', e); }
+
+    // Jalankan initGamesPage
+    try {
+      if (typeof window.resetLibraryFilter === 'function') window.resetLibraryFilter(); else window.libraryFilterActive = false;
+      
+      // Load filter panel HTML into the filter-panel container
+      const filterPanelHtml = await fetch("/components/filter-panel.html").then((r) => r.text());
+      const filterPanelContainer = document.getElementById("filter-panel");
+      if (filterPanelContainer) {
+        filterPanelContainer.innerHTML = filterPanelHtml;
+      }
+      
+      if (typeof initGamesPage === 'function') {
+        await initGamesPage();
+      }
+      _gamesPageLoaded = true;
+    } catch(e) { console.error('[navigate] initGamesPage error:', e); }
+    return;
+  }
+
+  // ----- HALAMAN LAIN: tampilkan app-content, sembunyikan games-page-persistent -----
+  _currentPage = page;
+  if (container)    container.style.display = "";
+  if (gamesPersist) gamesPersist.style.display = "none";
+
+  // Load page HTML with timeout
+  let html = '';
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(`/app/${page}.html`, { signal: ctrl.signal });
+    clearTimeout(t);
+    html = await res.text();
+  } catch(e) {
+    console.error('[navigate] Failed to load page HTML:', page, e);
+    return;
+  }
+
+  // Inject HTML
   container.innerHTML = html;
+
+  // Process script tags from the loaded HTML
   try {
     const temp = document.createElement('div');
     temp.innerHTML = html;
     const scripts = temp.querySelectorAll('script');
     scripts.forEach((old) => {
       const s = document.createElement('script');
-      // Only execute inline scripts to avoid reloading global JS twice
-      if (old.type) {
-        s.type = old.type;
-      }
-      // Handle both inline and external scripts for fix-games page
+      if (old.type) s.type = old.type;
+
       if (old.src) {
-        // For fix-games page, load external scripts
-        if (page === 'fix-games' && old.src.includes('fix-games.js')) {
-          // Check if script already loaded
-          const existing = document.querySelector(`script[src="${old.src}"]`);
-          if (!existing) {
-            s.src = old.src;
-            document.head.appendChild(s);
+        const srcAttr = old.getAttribute('src');
+        const existing = document.head.querySelector(`script[src="${srcAttr}"]`);
+        if (!existing) {
+          // First load - attach onload to call page init
+          s.src = srcAttr;
+          s.onload = () => {
+            console.log('[navigate] Script loaded:', srcAttr);
+            if (srcAttr.includes('home.js') && typeof window.initHomePage === 'function') {
+              console.log('[navigate] Calling initHomePage from onload');
+              window.initHomePage();
+            }
+          };
+          document.head.appendChild(s);
+        } else {
+          // Already in DOM - call init function directly with retry
+          console.log('[navigate] Script already loaded:', srcAttr);
+          if (srcAttr.includes('home.js')) {
+            const tryInit = (attempt) => {
+              if (typeof window.initHomePage === 'function') {
+                console.log('[navigate] Calling initHomePage (attempt', attempt, ')');
+                window.initHomePage();
+              } else if (attempt < 10) {
+                setTimeout(() => tryInit(attempt + 1), 200);
+              } else {
+                console.error('[navigate] initHomePage still not found after retries!');
+              }
+            };
+            tryInit(1);
           }
         }
       } else {
-        // Inline script content
+        // Inline script
         s.textContent = old.textContent || '';
         document.body.appendChild(s);
       }
     });
-  } catch (e) {}
+  } catch (e) {
+    console.error('[navigate] Script inject error:', e);
+  }
+
 
   // Active state
   sidebarDashboard?.classList.remove("bg-[#1f1f1f]", "text-white");
@@ -64,60 +197,6 @@ async function navigate(page, params = {}) {
     sidebarSettings?.classList.add("bg-[#1f1f1f]", "text-white");
   }
 
-  // Jika halaman adalah Games → jalankan render dengan filter normal
-  if (page === "games") {
-    // Load filter panel HTML into the filter-panel container (if present)
-    const filterPanelHtml = await fetch("/components/filter-panel.html").then((r) => r.text());
-    const filterPanelContainer = document.getElementById("filter-panel");
-    if (filterPanelContainer) {
-      filterPanelContainer.innerHTML = filterPanelHtml;
-    }
-
-    // PERBAIKAN: Reset library filter dengan benar saat kembali ke games page
-    // Reset semua library filter state SEBELUM initGamesPage
-    window.libraryFilterActive = false;
-    // Reset local variable di filter.js scope (jika bisa diakses)
-    try {
-      if (typeof libraryFilterActive !== 'undefined') {
-        libraryFilterActive = false;
-      }
-      // Reset libraryAppIds juga (optional, tapi lebih aman)
-      if (typeof libraryAppIds !== 'undefined' && libraryAppIds instanceof Set) {
-        libraryAppIds.clear();
-      }
-    } catch (e) {
-      // Jika tidak bisa akses, tidak apa-apa, window.libraryFilterActive sudah di-reset
-    }
-
-    // Call initGamesPage untuk load games (loadGames hanya untuk settings page)
-    if (typeof initGamesPage === "function") {
-      await initGamesPage();
-      // PERBAIKAN: Apply filters lagi setelah init untuk memastikan library filter tidak aktif
-      // Defer untuk tidak block UI
-      setTimeout(() => {
-        try {
-          if (typeof applyFilters === 'function') {
-            applyFilters(true);
-          }
-        } catch (e) {
-          // Error applying filters - non-critical
-        }
-      }, 150);
-    } else if (typeof loadGames === "function") {
-      // Fallback jika initGamesPage tidak ada
-      await loadGames();
-      // Apply filters juga
-      setTimeout(() => {
-        try {
-          if (typeof applyFilters === 'function') {
-            applyFilters(true);
-          }
-        } catch (e) {
-          // Error applying filters - non-critical
-        }
-      }, 150);
-    }
-  }
 
   // Jika halaman adalah Library → jalankan render dengan filter Library aktif
   if (page === "library") {
@@ -137,12 +216,12 @@ async function navigate(page, params = {}) {
     // Aktifkan library filter dan load games
     if (typeof toggleLibraryFilter === "function") {
       // Load library games (akan otomatis filter berdasarkan .lua files)
-      await toggleLibraryFilter();
+      await toggleLibraryFilter(true);
     } else if (typeof initGamesPage === "function") {
       // Fallback: init games page lalu aktifkan library filter
       await initGamesPage();
       if (typeof toggleLibraryFilter === "function") {
-        await toggleLibraryFilter();
+        await toggleLibraryFilter(true);
       }
     }
   }
@@ -283,11 +362,17 @@ async function navigate(page, params = {}) {
 
 // Load sidebar
 async function loadSidebar() {
+  console.log('[sidebar] Fetching sidebar.html...');
   const sidebar = await fetch("/components/sidebar.html").then((r) => r.text());
   document.getElementById("sidebar-container").innerHTML = sidebar;
-  
+  console.log('[sidebar] Sidebar loaded, loading license info...');
   // Load license info setelah sidebar dimuat
-  await loadLicenseInfo();
+  try {
+    await loadLicenseInfo();
+    console.log('[sidebar] License info loaded.');
+  } catch(e) {
+    console.warn('[sidebar] loadLicenseInfo error (non-fatal):', e.message);
+  }
 }
 
 // Load and display license info
@@ -338,8 +423,166 @@ async function loadLicenseInfo() {
   }
 }
 
+// Helper: update teks status di loading screen
+function setLoadingStatus(text) {
+  try {
+    const el = document.getElementById('global-loading-status');
+    if (el) el.textContent = text;
+  } catch(e) {}
+}
+
+// Initialize app and load essential data
+async function initApp() {
+  try {
+    console.log('[initApp] Step 1: Fetching SteamGamesData from bridge/cache...');
+    setLoadingStatus('Memuat data akun game...');
+    // Predownload essential data caches
+    try {
+      if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+        const acc = await window.desktopBridge.getSteamGamesData(false);
+        if (acc && Array.isArray(acc)) window.steamGamesData = acc;
+        console.log('[initApp] SteamGamesData loaded from bridge, count:', window.steamGamesData?.length || 0);
+      } else {
+        console.log('[initApp] No bridge, skipping SteamGamesData prefetch');
+      }
+    } catch (e) {
+      console.warn('[initApp] Failed caching steam games data at startup:', e);
+    }
+
+    // Start background pre-fetch for games page data (RawDataset + FixGamesData)
+    // These run in background - home.js will await window._precachePromise before hiding loading screen
+    console.log('[initApp] Starting background pre-fetch for games page data...');
+    setLoadingStatus('Mengunduh database seluruh game (147.000+ game)...');
+    window._precachePromise = Promise.all([
+      // Pre-fetch raw dataset (games page)
+      (async () => {
+        try {
+          if (window.desktopBridge && typeof window.desktopBridge.getRawDataset === 'function') {
+            console.log('[initApp] [bg] getRawDataset starting...');
+            const raw = await window.desktopBridge.getRawDataset(false);
+            if (raw) {
+              window.originalData = Array.isArray(raw) ? raw : Object.values(raw);
+              setLoadingStatus(`Database game siap (${window.originalData.length.toLocaleString()} game)`);
+              console.log('[initApp] [bg] getRawDataset done, count:', window.originalData?.length || 0);
+            }
+          }
+        } catch(e) { console.warn('[initApp] [bg] getRawDataset error:', e.message); }
+      })(),
+      // Pre-fetch fix games data
+      (async () => {
+        try {
+          if (window.desktopBridge && typeof window.desktopBridge.getFixGamesData === 'function') {
+            console.log('[initApp] [bg] getFixGamesData starting...');
+            const fix = await window.desktopBridge.getFixGamesData(false);
+            if (fix) {
+              window._fixGamesData = fix;
+              console.log('[initApp] [bg] getFixGamesData done');
+            }
+          }
+        } catch(e) { console.warn('[initApp] [bg] getFixGamesData error:', e.message); }
+      })()
+    ]).catch(e => console.warn('[initApp] precache error:', e));
+
+    console.log('[initApp] Step 2: Loading sidebar...');
+    setLoadingStatus('Memuat tampilan sidebar...');
+    await loadSidebar();
+
+    // Start pre-rendering Games page into the hidden persistent container
+    // This runs concurrently with loadSidebar and navigate('dashboard')
+    // so by the time loading screen hides, Games page is already rendered!
+    window._gamesPrerenderPromise = (async () => {
+      try {
+        // Wait for raw data first (needed by initGamesPage)
+        await window._precachePromise;
+        
+        if (!window.originalData || window.originalData.length < 100) {
+          console.log('[initApp] [games-prerender] No originalData, skipping prerender');
+          return;
+        }
+        
+        setLoadingStatus('Menyiapkan halaman Games...');
+        console.log('[initApp] [games-prerender] Starting games page prerender...');
+        
+        const gamesPersist = document.getElementById('games-page-persistent');
+        if (!gamesPersist) return;
+        
+        // Fetch and inject games.html into persistent container (hidden)
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const res = await fetch('/app/games.html', { signal: ctrl.signal });
+        clearTimeout(t);
+        const html = await res.text();
+        gamesPersist.innerHTML = html;
+        
+        // Load filter panel HTML into the filter-panel container
+        try {
+          const logToTerm = (m) => { try { if (window.desktopBridge) window.desktopBridge.send('AppLog', { message: m }); } catch(ex){} };
+          logToTerm('[games-prerender] Memuat filter-panel.html...');
+          const filterPanelHtml = await fetch("/components/filter-panel.html").then((r) => r.text());
+          const filterPanelContainer = gamesPersist.querySelector("#filter-panel");
+          if (filterPanelContainer) {
+            filterPanelContainer.innerHTML = filterPanelHtml;
+            logToTerm(`[games-prerender] filter-panel berhasil diinjeksi! Panjang string HTML: ${filterPanelHtml.length}`);
+          } else {
+            logToTerm('[games-prerender] ERROR FATAL: elemen #filter-panel TIDAK DITEMUKAN di dalam gamesPersist!');
+          }
+        } catch(e) {
+          console.warn('[initApp] [games-prerender] Failed to load filter panel:', e);
+          try { if(window.desktopBridge) window.desktopBridge.send('AppLog', { message: `[games-prerender] ERROR memuat filter-panel: ${e.message}` }); } catch(ex){}
+        }
+        
+        // Load scripts dari games.html yang belum ada di head
+        await new Promise((resolve) => {
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          const scripts = Array.from(temp.querySelectorAll('script[src]'));
+          let pending = 0;
+          scripts.forEach((old) => {
+            const srcAttr = old.getAttribute('src');
+            if (!document.head.querySelector(`script[src="${srcAttr}"]`)) {
+              pending++;
+              const s = document.createElement('script');
+              s.src = srcAttr;
+              s.onload = () => { pending--; if (pending === 0) resolve(); };
+              s.onerror = () => { pending--; if (pending === 0) resolve(); };
+              document.head.appendChild(s);
+            }
+          });
+          if (pending === 0) resolve();
+        });
+        
+        // Small delay to let scripts initialize
+        await new Promise(r => setTimeout(r, 100));
+        
+        // Run initGamesPage() to render games into the hidden container
+        if (typeof initGamesPage === 'function') {
+          console.log('[initApp] [games-prerender] Running initGamesPage()...');
+          if (typeof window.resetLibraryFilter === 'function') window.resetLibraryFilter(); else window.libraryFilterActive = false;
+          await initGamesPage();
+          _gamesPageLoaded = true;
+          console.log('[initApp] [games-prerender] Games page pre-rendered! Ready for instant display.');
+          setLoadingStatus('Semua siap!');
+        }
+      } catch(e) {
+        console.warn('[initApp] [games-prerender] Error:', e.message);
+      }
+    })();
+
+    console.log('[initApp] Step 3: Navigating to dashboard...');
+    navigate('dashboard');
+    console.log('[initApp] Step 4: Navigate dispatched.');
+    
+  } catch (err) {
+    console.error('[initApp] Critical error during app init:', err);
+    // Hide loading screen anyway to show UI safely
+    const loadingScreen = document.getElementById('global-loading-screen');
+    if (loadingScreen) loadingScreen.classList.add('hidden');
+  }
+}
+
 // Expose globally
 window.loadLicenseInfo = loadLicenseInfo;
+window.initApp = initApp;
 
 // Start app
-loadSidebar().then(() => navigate("games"));
+initApp();

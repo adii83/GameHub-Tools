@@ -1,10 +1,25 @@
-function toggleFilterPanel() {
+window.toggleFilterPanel = function() {
+  const logToTerminal = (msg) => {
+    console.log(msg);
+    try { if (window.desktopBridge && typeof window.desktopBridge.send === 'function') window.desktopBridge.send('AppLog', { message: msg }); } catch(e) {}
+  };
+
+  logToTerminal('[JS-LOG] [ui] Tombol toggleFilterPanel DITEKAN!');
+  
   const w = document.getElementById("filter-panel-wrapper");
-  if (!w) return;
+  if (!w) {
+    logToTerminal('[JS-LOG] [ui] ERROR KRITIS: Elemen #filter-panel-wrapper TIDAK DITEMUKAN di DOM layar Games!');
+    return;
+  }
+  
   const shown = w.classList.contains("panel-shown");
+  logToTerminal(`[JS-LOG] [ui] Wrapper filter-panel ditemukan. Status panel-shown: ${shown}. Mengeksekusi slide...`);
+  
   w.classList.toggle("panel-shown", !shown);
   w.classList.toggle("panel-hidden", shown);
-}
+  
+  logToTerminal(`[JS-LOG] [ui] Animasi telah dipantik! Daftar class elemen w saat ini: ${w.className}`);
+};
 
 // --- Online-Fix global helpers (hoisted to avoid listener conflicts) ---
 function hideOverlayById(id) {
@@ -941,18 +956,37 @@ function ensureUnavailableOverlay() {
   el.id = 'gh-unavail-overlay';
   el.className = 'fixed inset-0 z-[60] hidden';
   el.innerHTML = `
-    <div class="absolute inset-0 bg-black/60"></div>
-    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[28rem] max-w-[95vw] bg-[#151515] border border-white/10 rounded-xl shadow-2xl p-6">
-      <h3 class="text-lg font-semibold mb-3">Game Tidak Tersedia</h3>
-      <div id="gh-unavail-desc" class="text-sm text-gray-300 mb-4">Game Masih Belum Tersedia.</div>
-      <div class="flex justify-end gap-2">
-        <button id="gh-unavail-back" class="px-3 py-1.5 text-sm rounded bg-slate-700 text-white hover:opacity-90">Kembali</button>
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[30rem] max-w-[95vw] bg-[#151515] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+      <div id="gh-unavail-banner" class="w-full h-1.5 bg-gradient-to-r from-red-700 via-red-500 to-red-700"></div>
+      <div class="p-6">
+        <div class="flex items-start gap-4 mb-4">
+          <div class="shrink-0 w-10 h-10 rounded-full bg-red-600/20 border border-red-500/30 flex items-center justify-center">
+            <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white mb-1">Game Belum Dapat Dimainkan</h3>
+            <span id="gh-unavail-badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-red-600/80 text-white border border-red-500/30">
+              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+              DENUVO
+            </span>
+          </div>
+        </div>
+        <p id="gh-unavail-desc" class="text-sm text-gray-300 mb-5 leading-relaxed">Game ini menggunakan proteksi Denuvo dan saat ini belum tersedia di daftar Fix Games maupun Steam Account kami.</p>
+        <div class="text-xs text-gray-500 bg-white/5 rounded-lg px-4 py-3 mb-5 border border-white/5">
+          💡 Game dengan proteksi Denuvo memerlukan patch khusus. Pantau terus halaman <strong class="text-gray-300">Fix Games</strong> untuk melihat update ketersediaannya.
+        </div>
+        <div class="flex justify-end">
+          <button id="gh-unavail-back" class="px-4 py-2 text-sm rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors font-medium">Mengerti</button>
+        </div>
       </div>
     </div>
   `;
   document.body.appendChild(el);
   const back = el.querySelector('#gh-unavail-back');
   if (back) back.addEventListener('click', () => hideUnavailableOverlay());
+  // Close on backdrop click
+  el.querySelector('.absolute.inset-0')?.addEventListener('click', () => hideUnavailableOverlay());
 }
 function showUnavailableOverlay(message) {
   ensureUnavailableOverlay();
@@ -1066,6 +1100,30 @@ function hideProgressOverlay() {
 }
 
 function onAddGame(appid, name) {
+  // Verifikasi perlindungan Denuvo - cek ketersediaan di Fix Games & Steam Account
+  // Gunakan processedOriginalData (setelah normalisasi + override) sebagai sumber utama
+  // karena window.originalData adalah data RAW dari API sebelum override diterapkan
+  const dataSource = window.processedOriginalData || window.originalData || [];
+  const game = dataSource.find(g => String(g.appid) === String(appid));
+  if (game && game.protection === true) {
+    // window._fixGamesData adalah object { games: [...] } dari fix_games.json (di-cache saat initApp)
+    const fixGames = Array.isArray(window._fixGamesData?.games) ? window._fixGamesData.games
+                   : Array.isArray(window._fixGamesData) ? window._fixGamesData
+                   : [];
+    const isFixAvailable = fixGames.some(g => String(g.appid) === String(appid));
+
+    // window.steamGamesData adalah array dari steam_games.json (di-cache saat initApp)
+    const steamGames = Array.isArray(window.steamGamesData) ? window.steamGamesData : [];
+    const isSteamAvailable = steamGames.some(g => String(g.appid) === String(appid));
+
+    console.log(`[onAddGame] Denuvo check appid=${appid}: fixAvail=${isFixAvailable} steamAvail=${isSteamAvailable} (fixGames=${fixGames.length} steamGames=${steamGames.length} processedData=${window.processedOriginalData?.length || 0})`);
+    
+    if (!isFixAvailable && !isSteamAvailable) {
+      showUnavailableOverlay('Game ini menggunakan proteksi Denuvo dan saat ini belum tersedia di daftar Fix Games maupun Steam Account kami.');
+      return;
+    }
+  }
+
   showProgressOverlay(`Mengunduh untuk AppID ${appid}...`);
   window._gh_current_appid = String(appid);
   window.desktopBridge?.send('AddGame', { appid: String(appid), name: String(name || '') });
@@ -1474,7 +1532,9 @@ function updateAddRemoveButton(appid, installed) {
     } else {
       btn.textContent = 'Add-Game';
       btn.className = 'w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded bg-emerald-600 text-white text-sm font-medium hover:opacity-90';
-      const g = originalData?.find(x => String(x.appid) === String(appid));
+      // Gunakan processedOriginalData agar nama game dan protection dari override ikut terbaca
+      const dataSource = window.processedOriginalData || window.originalData || [];
+      const g = dataSource.find(x => String(x.appid) === String(appid));
       const name = g?.title || '';
       btn.onclick = () => onAddGame(appid, name);
     }
