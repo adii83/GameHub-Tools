@@ -4,21 +4,34 @@
   <div class="flex items-center gap-2">
     <span class="text-xs text-gray-400 hidden sm:inline mr-2">
       Tips: cari akurat pakai <span class="text-white/80">AppID</span> dari
-      <a href="https://steamdb.info/" target="_blank" rel="noopener noreferrer" class="underline text-blue-400 hover:text-blue-300">SteamDB</a>
+      <a
+        href="https://steamdb.info/"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="underline text-blue-400 hover:text-blue-300"
+        >SteamDB</a
+      >
     </span>
 
-    <input id="searchInput" oninput="debouncedApplyFilters()" onkeydown="onSearchKeyDown(event)"
+    <input
+      id="searchInput"
+      oninput="debouncedApplyFilters()"
+      onkeydown="onSearchKeyDown(event)"
       class="px-3 py-2 rounded-md bg-[#151515] border border-white/5 text-sm w-64"
-      placeholder="Search Games" />
+      placeholder="Search Games"
+    />
 
-    <button onclick="performRemoteSearch()"
-      class="px-3 py-2 rounded-md bg-purple-600 hover:bg-purple-700 border border-white/5 text-sm transition text-white">
+    <button
+      onclick="performRemoteSearch()"
+      class="px-3 py-2 rounded-md bg-purple-600 hover:bg-purple-700 border border-white/5 text-sm transition text-white"
+    >
       Cari
     </button>
 
-    
-    <button onclick="toggleFilterPanel()"
-      class="px-3 py-2 rounded-md bg-white/5 hover:bg-white/10 border border-white/5 text-sm transition">
+    <button
+      onclick="toggleFilterPanel()"
+      class="px-3 py-2 rounded-md bg-white/5 hover:bg-white/10 border border-white/5 text-sm transition"
+    >
       Filters
     </button>
   </div>
@@ -34,9 +47,14 @@
   </div>
 
   <!-- FILTER PANEL (KANAN, SLIDE) -->
-  <div id="filter-panel-wrapper"
-       class="w-64 fixed right-6 top-20 transition-all duration-300 ease-out panel-hidden">
-    <div id="filter-panel"></div>
+  <div
+    id="filter-panel-wrapper"
+    class="w-64 fixed z-50 right-6 top-20 transition-all duration-300 ease-out panel-hidden"
+  >
+    <div
+      id="filter-panel"
+      class="bg-[#1f1f1f] border border-white/5 rounded-lg p-5 shadow-2xl"
+    ></div>
   </div>
 </div>
 
@@ -45,12 +63,14 @@
   <!-- Ensure desktop bridge + core scripts are loaded on games view -->
   <script src="/js/bridge.js"></script>
   <script src="/js/page-cache.js"></script>
-  <script src="/js/router.js"></script>
   <script src="/js/ui.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/render.js"></script>
   <div id="drawer-overlay" class="absolute inset-0 bg-black/60"></div>
-  <div id="detail-drawer-panel" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[48rem] max-w-[96vw] max-h-[88vh] bg-[#151515] border border-white/10 rounded-2xl shadow-2xl p-6 opacity-0 scale-95 transition-all duration-200">
+  <div
+    id="detail-drawer-panel"
+    class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[48rem] max-w-[96vw] max-h-[88vh] bg-[#151515] border border-white/10 rounded-2xl shadow-2xl p-6 opacity-0 scale-95 transition-all duration-200"
+  >
     <div id="detail-card" class="h-full overflow-auto premium-scroll">
       <!-- content injected -->
     </div>

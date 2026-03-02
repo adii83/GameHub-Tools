@@ -337,11 +337,10 @@ namespace GameHubDesktop.Services
             }
         }
 
-        // Check server headers (ETag/LastModified) without downloading
         private static async Task<(string? ETag, string? LastModified)?> CheckServerHeadersAsync()
         {
             using var http = new HttpClient();
-            http.Timeout = TimeSpan.FromSeconds(30);
+            http.Timeout = TimeSpan.FromSeconds(10);
 
             try
             {
@@ -370,7 +369,7 @@ namespace GameHubDesktop.Services
         private static async Task<(object? Data, string? ETag, string? LastModified)?> DownloadRawAsync(Action<int, string>? progressCallback = null)
         {
             using var http = new HttpClient();
-            http.Timeout = TimeSpan.FromMinutes(5); // Large file may take time
+            http.Timeout = TimeSpan.FromSeconds(25); // Faster timeout to prevent UI hang
 
             try
             {

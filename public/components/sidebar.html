@@ -1,32 +1,50 @@
-<div class="w-48 h-screen bg-[#141414] border-r border-white/5 flex flex-col p-4">
+<div
+  class="w-48 h-screen bg-[#141414] border-r border-white/5 flex flex-col p-4"
+>
   <h1 class="text-white font-bold text-xl mb-6 tracking-wide">GameHub</h1>
 
   <nav class="flex flex-col gap-2 h-full">
-    <button onclick="navigate('dashboard')" id="nav-dashboard"
-      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition">
-      <span>🏠</span><span>Dashboard</span>
+    <button
+      onclick="navigate('dashboard')"
+      id="nav-dashboard"
+      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-brands fa-hire-a-helper text-white"></i><span>Home</span>
     </button>
 
-    <button onclick="navigate('games')" id="nav-games"
-      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition">
-      <span>🎮</span><span>Games</span>
+    <button
+      onclick="navigate('games')"
+      id="nav-games"
+      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-brands fa-steam text-white"></i><span>Games</span>
     </button>
 
-    <button onclick="navigate('library')" id="nav-library"
-      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition">
-      <span>📚</span><span>Library</span>
+    <button
+      onclick="navigate('library')"
+      id="nav-library"
+      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-solid fa-bars-progress text-white"></i><span>Library</span>
     </button>
 
-    <button onclick="navigate('fix-games')" id="nav-fix-games"
-      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition">
-      <span>🔧</span><span>Fix Games</span>
+    <button
+      onclick="navigate('fix-games')"
+      id="nav-fix-games"
+      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-solid fa-unlock-keyhole text-white"></i
+      ><span>Fix Games</span>
     </button>
 
     <div class="flex-1"></div>
 
-    <button onclick="navigate('settings')" id="nav-settings"
-      class="mt-auto flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition">
-      <span>⚙️</span><span>Settings</span>
+    <button
+      onclick="navigate('settings')"
+      id="nav-settings"
+      class="mt-auto flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-solid fa-gear text-white"></i><span>Settings</span>
     </button>
   </nav>
 </div>

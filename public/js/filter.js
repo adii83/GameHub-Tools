@@ -29,8 +29,8 @@ let libraryFilterActive = false;
 window.libraryFilterActive = false;
 
 function applyFilters(render = true) {
-  // Do not clear page cache on filter change; we avoid triggering rebuilds
-  // so filtering operates only on already-fetched data.
+  // Clear persistent UI pageCache so that page bounds are fresh and we don't accidentally load old cached views (like Library)
+  try { if (typeof window.clearRenderPageCache === 'function') window.clearRenderPageCache(); } catch(e) {}
   const standard = document.getElementById("chk-standard")?.checked;
   const premium = document.getElementById("chk-premium")?.checked;
 
@@ -49,6 +49,7 @@ function applyFilters(render = true) {
   try {
     window.filtersActive = !!(standard || premium || denuvo || nonDen || genreChecks.length > 0 || searchNorm || libraryFilterActive);
     window.fillFilteredPages = !!(standard || premium);
+    console.log(`[JS-LOG] [filter] applyFilters called. activeFilters: { standard: ${!!standard}, premium: ${!!premium}, search: "${searchNorm}", library: ${libraryFilterActive} }, totalOriginalData: ${originalData ? originalData.length : 0}`);
   } catch (e) {}
 
   // Special case: Library filter active but no games installed
@@ -102,6 +103,13 @@ function applyFilters(render = true) {
 
       return true;
     });
+  }
+
+  // Interleave filtered data to maintain 13:7 premium-to-standard ratio if applicable
+  if (typeof window.interleavePremiumStandard === 'function' && filteredData && filteredData.length > 0) {
+    if (window.filtersActive) {
+      filteredData = window.interleavePremiumStandard(filteredData, 13, 7);
+    }
   }
 
   // Update Library button visual state
@@ -420,27 +428,55 @@ async function toggleLibraryFilter() {
 
       libraryFilterActive = true;
       window.libraryFilterActive = true;
+
+      // --- Cek game yang ada di library (lua) tapi tidak ada di database utama ---
+      // Ini terjadi misalnya untuk DLC appid, depot sub-appid, atau game dari tool lain
+      const dbAppIds = new Set((window.originalData || []).map(g => String(g.appid)));
+      const missingFromDb = [...libraryAppIds].filter(id => !dbAppIds.has(id));
+
+      if (missingFromDb.length > 0) {
+        // Tambahkan placeholder minimal untuk setiap appid yang tidak ada di database
+        // sehingga tetap muncul di tampilan Library dengan info dasar
+        const placeholders = missingFromDb.map(appid => ({
+          appid: Number(appid),
+          title: `Game ID: ${appid}`,
+          header: `https://cdn.cloudflare.steamstatic.com/steam/apps/${appid}/header.jpg`,
+          genre: [],
+          genre_display: '',
+          short_description: 'Data game ini tidak tersedia di database GameHub. Game terdeteksi dari daftar library Steam Anda.',
+          price_normalized: 0,
+          price_initial: 0,
+          protection: null,
+          tier: 'standard',
+          _libraryPlaceholder: true,
+        }));
+        // Sisipkan ke window.originalData agar bisa terbaca oleh filter
+        if (window.originalData && Array.isArray(window.originalData)) {
+          window.originalData.push(...placeholders);
+        }
+      }
+
       applyFilters(true);
       
-      // OPTIMASI: Tampilkan library message hanya sekali saat pertama kali buka library page
-      // Cek apakah sudah pernah tampil sebelumnya
+      // Toast notification - tampilkan count yang akurat
       const LIBRARY_MESSAGE_SHOWN_KEY = 'gamehub_library_message_shown';
       const lastShownCount = localStorage.getItem(LIBRARY_MESSAGE_SHOWN_KEY);
       const currentCount = libraryAppIds.size.toString();
       
-      // Tampilkan hanya jika:
-      // 1. Belum pernah ditampilkan sebelumnya, ATAU
-      // 2. Jumlah game berubah (ada data terbaru)
       if (!lastShownCount || lastShownCount !== currentCount) {
         if (typeof showTransientMessage === 'function') {
-          showTransientMessage(`Menampilkan ${libraryAppIds.size} game dari Library`, 3000, 'success');
+          if (missingFromDb.length > 0) {
+            showTransientMessage(
+              `Library: ${libraryAppIds.size} game terdeteksi (${missingFromDb.length} tidak ada di database, ditampilkan sebagai placeholder)`,
+              5000, 'warning'
+            );
+          } else {
+            showTransientMessage(`Menampilkan ${libraryAppIds.size} game dari Library`, 3000, 'success');
+          }
         }
-        // Simpan flag bahwa sudah ditampilkan dengan jumlah game saat ini
         try {
           localStorage.setItem(LIBRARY_MESSAGE_SHOWN_KEY, currentCount);
-        } catch (e) {
-          // Ignore localStorage error
-        }
+        } catch (e) {}
       }
     } catch (e) {
       if (typeof showTransientMessage === 'function') {
@@ -465,4 +501,8 @@ async function toggleLibraryFilter() {
 // Expose to window
 try {
   window.toggleLibraryFilter = toggleLibraryFilter;
+  window.resetLibraryFilter = () => {
+    libraryFilterActive = false;
+    window.libraryFilterActive = false;
+  };
 } catch (e) {}

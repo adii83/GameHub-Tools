@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -7,23 +6,34 @@ using System.Threading.Tasks;
 
 namespace GameHubDesktop.Services
 {
-    public static class SteamGamesDataService
+    public static class HomeDataService
     {
-        private const string STEAM_GAMES_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json";
+        private const string POPULAR_GAMES_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/appid_populer.json";
+        private const string NEW_FIX_GAMES_URL = "https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/new_fix_games.json";
         private const int CACHE_TTL_HOURS = 24;
-        
+
         private static readonly string CacheDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "GameHub");
-        private static readonly string CacheFile = Path.Combine(CacheDir, "steam_games.json");
-        private static readonly string MetaFile = Path.Combine(CacheDir, "steam_games_meta.json");
+        private static readonly string PopularCacheFile = Path.Combine(CacheDir, "appid_populer.json");
+        private static readonly string PopularMetaFile = Path.Combine(CacheDir, "appid_populer_meta.json");
+        private static readonly string NewFixCacheFile = Path.Combine(CacheDir, "new_fix_games.json");
+        private static readonly string NewFixMetaFile = Path.Combine(CacheDir, "new_fix_games_meta.json");
+
+        private class CacheState
+        {
+            public object? Data { get; set; }
+            public DateTime? LastLoadTime { get; set; }
+        }
+
+        private static readonly CacheState _popularCache = new CacheState();
+        private static readonly CacheState _newFixCache = new CacheState();
         
-        private static object? _cachedData = null;
-        private static DateTime? _lastLoadTime = null;
-        private static readonly object _lock = new object();
+        private static readonly object _popularLock = new object();
+        private static readonly object _newFixLock = new object();
 
         public static Action<string>? Log { get; set; }
         private static void LogInfo(string message)
         {
-            try { Log?.Invoke($"[SteamGamesDataService] {message}"); } catch { }
+            try { Log?.Invoke($"[HomeDataService] {message}"); } catch { }
         }
 
         public static void Initialize()
@@ -41,100 +51,126 @@ namespace GameHubDesktop.Services
             }
         }
 
-        public static async Task<object?> GetSteamGamesDataAsync(bool forceRefresh = false, Action<int, string>? progressCallback = null)
+        public static async Task<object?> GetPopularGamesAsync(bool forceRefresh = false, Action<int, string>? progressCallback = null)
         {
-            lock (_lock)
+            return await GetGenericDataAsync(
+                forceRefresh, 
+                POPULAR_GAMES_URL, 
+                PopularCacheFile, 
+                PopularMetaFile, 
+                _popularLock, 
+                _popularCache, 
+                "appid_populer", 
+                progressCallback);
+        }
+
+        public static async Task<object?> GetNewFixGamesAsync(bool forceRefresh = false, Action<int, string>? progressCallback = null)
+        {
+            return await GetGenericDataAsync(
+                forceRefresh, 
+                NEW_FIX_GAMES_URL, 
+                NewFixCacheFile, 
+                NewFixMetaFile, 
+                _newFixLock, 
+                _newFixCache, 
+                "new_fix_games", 
+                progressCallback);
+        }
+
+        private static async Task<object?> GetGenericDataAsync(
+            bool forceRefresh, 
+            string url, 
+            string cacheFile, 
+            string metaFile, 
+            object syncLock, 
+            CacheState cacheState,
+            string label,
+            Action<int, string>? progressCallback)
+        {
+            lock (syncLock)
             {
-                if (!forceRefresh && _cachedData != null && _lastLoadTime.HasValue)
+                if (!forceRefresh && cacheState.Data != null && cacheState.LastLoadTime.HasValue)
                 {
-                    var age = DateTime.UtcNow - _lastLoadTime.Value;
+                    var age = DateTime.UtcNow - cacheState.LastLoadTime.Value;
                     if (age.TotalHours < CACHE_TTL_HOURS)
                     {
                         progressCallback?.Invoke(100, "Data dari memori");
-                        return _cachedData;
+                        return cacheState.Data;
                     }
                 }
             }
 
-            var cacheValid = !forceRefresh && IsCacheValid();
+            var cacheValid = !forceRefresh && IsCacheValid(cacheFile, metaFile);
 
             if (cacheValid)
             {
                 try
                 {
                     progressCallback?.Invoke(50, "Memuat dari cache disk...");
-                    var data = LoadFromDisk();
+                    var data = LoadFromDisk(cacheFile);
                     if (data != null)
                     {
-                        lock (_lock)
+                        lock (syncLock)
                         {
-                            _cachedData = data;
-                            _lastLoadTime = DateTime.UtcNow;
+                            cacheState.Data = data;
+                            cacheState.LastLoadTime = DateTime.UtcNow;
                         }
                         progressCallback?.Invoke(100, "Data dimuat dari cache");
                         return data;
                     }
-
                     cacheValid = false;
                 }
                 catch (Exception ex)
                 {
                     cacheValid = false;
-                    LogInfo($"Failed to load from disk cache: {ex.Message}");
+                    LogInfo($"Failed to load {label} from disk cache: {ex.Message}");
                 }
             }
 
-            if (forceRefresh)
-            {
-                LogInfo("Force refresh requested, downloading latest steam_games.json");
-            }
-            else
-            {
-                LogInfo("Cache expired atau tidak valid (>=24 jam), downloading latest steam_games.json");
-            }
+            LogInfo($"{(forceRefresh ? "Force refresh requested" : "Cache expired")}, downloading {label}.json");
 
             try
             {
-                LogInfo("Downloading steam_games.json from GitHub");
+                LogInfo($"Downloading {label}.json from GitHub");
                 progressCallback?.Invoke(10, "Memulai download...");
-                var downloadResult = await DownloadDataAsync(progressCallback);
+                var downloadResult = await DownloadDataAsync(url, progressCallback);
                 if (downloadResult.HasValue && downloadResult.Value.Data != null)
                 {
                     var data = downloadResult.Value.Data;
                     try
                     {
                         progressCallback?.Invoke(95, "Menyimpan ke cache...");
-                        SaveToDisk(data, downloadResult.Value.ETag, downloadResult.Value.LastModified);
-                        LogInfo("Steam games data saved to disk cache");
+                        SaveToDisk(data, cacheFile, metaFile, downloadResult.Value.ETag, downloadResult.Value.LastModified);
+                        LogInfo($"{label} data saved to disk cache");
                         progressCallback?.Invoke(100, "Selesai!");
                     }
                     catch (Exception ex)
                     {
-                        LogInfo($"Failed to save to disk: {ex.Message}");
+                        LogInfo($"Failed to save {label} to disk: {ex.Message}");
                     }
 
-                    lock (_lock)
+                    lock (syncLock)
                     {
-                        _cachedData = data;
-                        _lastLoadTime = DateTime.UtcNow;
+                        cacheState.Data = data;
+                        cacheState.LastLoadTime = DateTime.UtcNow;
                     }
                     return data;
                 }
             }
             catch (Exception ex)
             {
-                LogInfo($"Failed to download: {ex.Message}");
-                if (File.Exists(CacheFile))
+                LogInfo($"Failed to download {label}: {ex.Message}");
+                if (File.Exists(cacheFile))
                 {
                     try
                     {
-                        var stale = LoadFromDisk();
+                        var stale = LoadFromDisk(cacheFile);
                         if (stale != null)
                         {
-                            lock (_lock)
+                            lock (syncLock)
                             {
-                                _cachedData = stale;
-                                _lastLoadTime = DateTime.UtcNow;
+                                cacheState.Data = stale;
+                                cacheState.LastLoadTime = DateTime.UtcNow;
                             }
                             return stale;
                         }
@@ -146,14 +182,14 @@ namespace GameHubDesktop.Services
             return null;
         }
 
-        private static bool IsCacheValid()
+        private static bool IsCacheValid(string cacheFile, string metaFile)
         {
             try
             {
-                if (!File.Exists(CacheFile) || !File.Exists(MetaFile))
+                if (!File.Exists(cacheFile) || !File.Exists(metaFile))
                     return false;
 
-                var metaJson = File.ReadAllText(MetaFile);
+                var metaJson = File.ReadAllText(metaFile);
                 var meta = JsonSerializer.Deserialize<CacheMeta>(metaJson);
                 if (meta == null || !meta.Timestamp.HasValue)
                     return false;
@@ -167,14 +203,14 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static object? LoadFromDisk()
+        private static object? LoadFromDisk(string cacheFile)
         {
             try
             {
-                if (!File.Exists(CacheFile))
+                if (!File.Exists(cacheFile))
                     return null;
 
-                var json = File.ReadAllText(CacheFile);
+                var json = File.ReadAllText(cacheFile);
                 return JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
@@ -187,7 +223,7 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static void SaveToDisk(object data, string? eTag = null, string? lastModified = null)
+        private static void SaveToDisk(object data, string cacheFile, string metaFile, string? eTag = null, string? lastModified = null)
         {
             try
             {
@@ -195,7 +231,7 @@ namespace GameHubDesktop.Services
                 {
                     WriteIndented = false
                 });
-                File.WriteAllText(CacheFile, json);
+                File.WriteAllText(cacheFile, json);
 
                 var meta = new CacheMeta
                 {
@@ -204,7 +240,7 @@ namespace GameHubDesktop.Services
                     LastModified = lastModified
                 };
                 var metaJson = JsonSerializer.Serialize(meta);
-                File.WriteAllText(MetaFile, metaJson);
+                File.WriteAllText(metaFile, metaJson);
             }
             catch (Exception ex)
             {
@@ -213,19 +249,19 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static async Task<(object? Data, string? ETag, string? LastModified)?> DownloadDataAsync(Action<int, string>? progressCallback = null)
+        private static async Task<(object? Data, string? ETag, string? LastModified)?> DownloadDataAsync(string url, Action<int, string>? progressCallback = null)
         {
             using var http = new HttpClient();
             http.Timeout = TimeSpan.FromSeconds(10);
 
             try
             {
-                var requestUrl = STEAM_GAMES_URL;
+                var requestUrl = url;
                 if (requestUrl.Contains("raw.githubusercontent.com"))
                 {
                     requestUrl += $"?t={DateTime.UtcNow.Ticks}";
                 }
-
+                
                 using var req = new HttpRequestMessage(HttpMethod.Get, requestUrl);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
                 req.Headers.Add("Cache-Control", "no-cache");
@@ -240,7 +276,7 @@ namespace GameHubDesktop.Services
                 }
 
                 var totalBytes = resp.Content.Headers.ContentLength ?? 0;
-                progressCallback?.Invoke(30, totalBytes > 0 ? $"Mengunduh {FormatBytes(totalBytes)}..." : "Mengunduh...");
+                progressCallback?.Invoke(30, "Mengunduh...");
 
                 using var stream = await resp.Content.ReadAsStreamAsync();
                 using var reader = new StreamReader(stream);
@@ -263,8 +299,7 @@ namespace GameHubDesktop.Services
                         if (percent > lastPercent + 5)
                         {
                             lastPercent = percent;
-                            var msg = $"Mengunduh {FormatBytes(totalRead)} / {FormatBytes(totalBytes)} ({percent}%)";
-                            progressCallback?.Invoke(percent, msg);
+                            progressCallback?.Invoke(percent, $"Mengunduh {totalRead / 1024} KB...");
                         }
                     }
                     else
@@ -273,7 +308,7 @@ namespace GameHubDesktop.Services
                         if (percent > lastPercent + 5)
                         {
                             lastPercent = percent;
-                            progressCallback?.Invoke(percent, $"Mengunduh {FormatBytes(totalRead)}...");
+                            progressCallback?.Invoke(percent, $"Mengunduh {totalRead / 1024} KB...");
                         }
                     }
                 }
@@ -290,7 +325,7 @@ namespace GameHubDesktop.Services
                 string? eTag = resp.Headers.ETag?.Tag;
                 string? lastModified = resp.Content.Headers.LastModified?.ToString("R");
                 
-                LogInfo($"Downloaded steam_games.json successfully ({FormatBytes(json.Length)})");
+                LogInfo($"Downloaded successfully ({json.Length} bytes)");
                 return (data, eTag, lastModified);
             }
             catch (Exception ex)
@@ -300,40 +335,25 @@ namespace GameHubDesktop.Services
             }
         }
 
-        private static string FormatBytes(long bytes)
-        {
-            string[] sizes = { "B", "KB", "MB", "GB" };
-            double len = bytes;
-            int order = 0;
-            while (len >= 1024 && order < sizes.Length - 1)
-            {
-                order++;
-                len = len / 1024;
-            }
-            return $"{len:0.##} {sizes[order]}";
-        }
-
         public static void ClearCache()
         {
             try
             {
-                lock (_lock)
+                lock (_popularLock)
                 {
-                    _cachedData = null;
-                    _lastLoadTime = null;
+                    _popularCache.Data = null;
+                    _popularCache.LastLoadTime = null;
+                }
+                lock (_newFixLock)
+                {
+                    _newFixCache.Data = null;
+                    _newFixCache.LastLoadTime = null;
                 }
                 
-                if (File.Exists(CacheFile))
-                {
-                    File.Delete(CacheFile);
-                    LogInfo("Cache file deleted");
-                }
-                
-                if (File.Exists(MetaFile))
-                {
-                    File.Delete(MetaFile);
-                    LogInfo("Meta file deleted");
-                }
+                if (File.Exists(PopularCacheFile)) File.Delete(PopularCacheFile);
+                if (File.Exists(PopularMetaFile)) File.Delete(PopularMetaFile);
+                if (File.Exists(NewFixCacheFile)) File.Delete(NewFixCacheFile);
+                if (File.Exists(NewFixMetaFile)) File.Delete(NewFixMetaFile);
                 
                 LogInfo("Cache cleared successfully");
             }

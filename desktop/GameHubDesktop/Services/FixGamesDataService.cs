@@ -224,8 +224,16 @@ namespace GameHubDesktop.Services
 
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Get, FIX_GAMES_URL);
+                var requestUrl = FIX_GAMES_URL;
+                if (requestUrl.Contains("raw.githubusercontent.com"))
+                {
+                    requestUrl += $"?t={DateTime.UtcNow.Ticks}";
+                }
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, requestUrl);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
+                req.Headers.Add("Cache-Control", "no-cache");
+                req.Headers.Add("Pragma", "no-cache");
                 
                 progressCallback?.Invoke(20, "Menghubungkan ke server...");
                 using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);

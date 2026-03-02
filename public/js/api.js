@@ -1,6 +1,6 @@
 // Raw-only mode: remove Steam endpoints and proxy usage
 const PAGE_SIZE = 20;
-const PREMIUM_MIN = 350000; // price >= this is premium tier
+const PREMIUM_MIN = 130000; // price >= this is premium tier
 
 // Removed: fetchAppDetails — not used in raw-only pipeline
 

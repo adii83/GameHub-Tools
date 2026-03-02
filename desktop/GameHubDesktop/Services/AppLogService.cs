@@ -16,10 +16,12 @@ namespace GameHubDesktop.Services
 
         public void Append(string message)
         {
-            var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
+            var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
             _lines.Enqueue(line);
             while (_lines.Count > MaxLines && _lines.TryDequeue(out _)) { }
             try { Appended?.Invoke(line); } catch { }
+            // Print to terminal (CMD) in real-time
+            try { Console.WriteLine(line); } catch { }
         }
 
         public List<string> GetAll() => _lines.ToList();

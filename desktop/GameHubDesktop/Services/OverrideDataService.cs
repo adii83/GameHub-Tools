@@ -167,9 +167,16 @@ namespace GameHubDesktop.Services
                 using var http = new HttpClient();
                 http.Timeout = TimeSpan.FromSeconds(15);
                 
-                // Download file untuk compare (file kecil, tidak masalah)
-                using var req = new HttpRequestMessage(HttpMethod.Get, OVERRIDE_DATA_URL);
+                var requestUrl = OVERRIDE_DATA_URL;
+                if (requestUrl.Contains("raw.githubusercontent.com"))
+                {
+                    requestUrl += $"?t={DateTime.UtcNow.Ticks}";
+                }
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, requestUrl);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
+                req.Headers.Add("Cache-Control", "no-cache");
+                req.Headers.Add("Pragma", "no-cache");
                 
                 var resp = await http.SendAsync(req);
                 if (!resp.IsSuccessStatusCode)
@@ -387,9 +394,16 @@ namespace GameHubDesktop.Services
             {
                 using var http = new HttpClient();
                 http.Timeout = TimeSpan.FromMinutes(2);
-                
-                using var req = new HttpRequestMessage(HttpMethod.Get, OVERRIDE_DATA_URL);
+                var requestUrl = OVERRIDE_DATA_URL;
+                if (requestUrl.Contains("raw.githubusercontent.com"))
+                {
+                    requestUrl += $"?t={DateTime.UtcNow.Ticks}";
+                }
+
+                using var req = new HttpRequestMessage(HttpMethod.Get, requestUrl);
                 req.Headers.Add("User-Agent", "GameHub/1.0");
+                req.Headers.Add("Cache-Control", "no-cache");
+                req.Headers.Add("Pragma", "no-cache");
                 
                 using var resp = await http.SendAsync(req);
                 if (!resp.IsSuccessStatusCode)
