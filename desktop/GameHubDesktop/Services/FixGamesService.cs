@@ -2315,7 +2315,7 @@ namespace GameHubDesktop.Services
         }
 
         // Scan executables in game folder
-        public Task<object> ScanExecutablesAsync(string gamePath, string? gameTitle = null)
+        public Task<object> ScanExecutablesAsync(string gamePath, string? gameTitle = null, string? exeHint = null)
         {
             try
             {
@@ -2395,8 +2395,33 @@ namespace GameHubDesktop.Services
                             score -= 10; // Terlalu kecil, mungkin helper
                         }
 
-                        // 4. Similarity dengan nama game (PRIORITAS UTAMA)
-                        if (!string.IsNullOrWhiteSpace(normalizedGameTitle) && !string.IsNullOrWhiteSpace(fileNameWithoutExt))
+                        // 4. exe_hint override (PRIORITAS TERTINGGI)
+                        bool hintMatched = false;
+                        if (!string.IsNullOrWhiteSpace(exeHint))
+                        {
+                            if (exeHint.Contains('/') || exeHint.Contains('\\'))
+                            {
+                                // relpath matching — cocokkan path relatif dari root game folder
+                                var normalizedHint = exeHint.Replace('\\', '/');
+                                var normalizedRel = relativePath.Replace('\\', '/');
+                                hintMatched = string.Equals(normalizedRel, normalizedHint, StringComparison.OrdinalIgnoreCase);
+                            }
+                            else
+                            {
+                                // filename-only matching — cocokkan nama file saja (bisa ada di subfolder manapun)
+                                hintMatched = string.Equals(fileName, exeHint, StringComparison.OrdinalIgnoreCase);
+                            }
+
+                            if (hintMatched)
+                            {
+                                score += 100;          // Override agar selalu jadi yang pertama
+                                similarityScore = 100;
+                                LogInfo($"exe_hint match: '{fileName}' (hint='{exeHint}')");
+                            }
+                        }
+
+                        // 5. Similarity dengan nama game (PRIORITAS UTAMA — hanya jika tidak ada hint match)
+                        if (!hintMatched && !string.IsNullOrWhiteSpace(normalizedGameTitle) && !string.IsNullOrWhiteSpace(fileNameWithoutExt))
                         {
                             var normalizedExeName = System.Text.RegularExpressions.Regex.Replace(fileNameWithoutExt, @"[^a-zA-Z0-9]", "").ToLowerInvariant();
                             
@@ -2417,7 +2442,7 @@ namespace GameHubDesktop.Services
                         }
 
                         // Set recommended jika similarity score tinggi ATAU score tinggi
-                        bool recommended = similarityScore >= 50 || score >= 30;
+                        bool recommended = hintMatched || similarityScore >= 50 || score >= 30;
 
                         // Extract icon from executable
                         string? iconBase64 = null;

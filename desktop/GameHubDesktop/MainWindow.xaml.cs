@@ -1484,6 +1484,7 @@ namespace GameHubDesktop
                     {
                         var gamePath = msg.payload.TryGetProperty("gamePath", out var gp) ? gp.GetString() : string.Empty;
                         var gameTitle = msg.payload.TryGetProperty("gameTitle", out var gt) ? gt.GetString() : null;
+                        var exeHint = msg.payload.TryGetProperty("exeHint", out var eh) ? eh.GetString() : null;
                         if (string.IsNullOrWhiteSpace(gamePath))
                         {
                             SendToJs(new { type = "FixGamesScanExecutables", success = false, error = "Game path tidak valid" });
@@ -1491,7 +1492,7 @@ namespace GameHubDesktop
                         }
                         _ = Task.Run(async () =>
                         {
-                            var result = await _fixGames.ScanExecutablesAsync(gamePath, gameTitle);
+                            var result = await _fixGames.ScanExecutablesAsync(gamePath, gameTitle, exeHint);
                             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => SendToJs(result));
                         });
                         break;
