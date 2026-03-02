@@ -259,8 +259,52 @@ function renderFixGameDetail(game) {
   if (appid) {
     appid.textContent = `AppID: ${game.appid}`;
   }
-  
+
+  // --- Launch Method Indicator (use_shortcut) ---
+  const useShortcut = game.use_shortcut === true;
+  const launchMethodCard = document.getElementById('fix-launch-method');
+  const steamBadge = document.getElementById('fix-launch-steam');
+  const steamCheck = document.getElementById('fix-launch-steam-check');
+  const shortcutBadge = document.getElementById('fix-launch-shortcut');
+  const shortcutCheck = document.getElementById('fix-launch-shortcut-check');
+  const launchNote = document.getElementById('fix-launch-method-note');
+
+  if (launchMethodCard) {
+    launchMethodCard.classList.remove('hidden');
+
+    if (useShortcut) {
+      // Shortcut aktif
+      if (steamBadge) steamBadge.className = 'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium border-white/10 text-gray-500 bg-white/5';
+      if (steamCheck) steamCheck.className = 'fa-solid fa-circle-xmark text-red-500';
+      if (shortcutBadge) shortcutBadge.className = 'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium border-green-500/50 text-green-400 bg-green-500/10';
+      if (shortcutCheck) shortcutCheck.className = 'fa-solid fa-circle-check text-green-400';
+      if (launchNote) launchNote.innerHTML = `
+        <p class="text-sm font-semibold text-white">Game ini dijalankan melalui Shortcut Desktop yang dibuat otomatis setelah proses fix selesai.</p>
+        <div class="mt-3 bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 space-y-2">
+          <h5 class="text-xs font-semibold text-blue-400 uppercase tracking-wide"><i class="fa-brands fa-steam mr-1"></i> Cara Menambahkan Shortcut ke Steam</h5>
+          <ol class="space-y-1.5 text-xs text-gray-300 list-decimal list-inside">
+            <li>Buka Steam → masuk ke <strong class="text-white">Library</strong>.</li>
+            <li>Klik <strong class="text-white">Add a Game</strong> → pilih <strong class="text-white">Add a Non-Steam Game</strong>.</li>
+            <li>Klik <strong class="text-white">Browse</strong> → masuk ke folder <strong class="text-white">Desktop</strong>.</li>
+            <li>Pilih <strong class="text-white">&quot;${escapeHtml(game.title)} - Fix&quot;</strong> → klik <strong class="text-white">Add Selected Programs</strong>.</li>
+            <li>Jalankan game dari <strong class="text-white">&quot;${escapeHtml(game.title)} - Fix&quot;</strong> di Library.</li>
+          </ol>
+          <p class="text-xs text-red-400 font-semibold pt-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Note: Jangan jalankan dari versi original Steam, GAK AKAN BISA.</p>
+        </div>
+      `;
+    } else {
+      // Steam aktif
+      if (steamBadge) steamBadge.className = 'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium border-blue-500/50 text-blue-400 bg-blue-500/10';
+      if (steamCheck) steamCheck.className = 'fa-solid fa-circle-check text-green-400';
+      if (shortcutBadge) shortcutBadge.className = 'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium border-white/10 text-gray-500 bg-white/5';
+      if (shortcutCheck) shortcutCheck.className = 'fa-solid fa-circle-xmark text-red-500';
+      if (launchNote) launchNote.innerHTML = `
+        <p class="text-sm font-semibold text-white">Game ini dijalankan normal melalui Steam setelah proses fix selesai.</p>
+      `;
+    }
+  }
 }
+
 
 // Start fix game process (runs in background)
 async function startFixGameProcess() {
@@ -425,6 +469,16 @@ async function startFixGameProcess() {
       await cleanupTempFiles(downloadResult.downloadPath, extractResult.extractedPath);
     } catch (e) {
       // Non-fatal error - continue
+    }
+    
+    // Step 8: Auto-create shortcut (hanya jika use_shortcut: true, non-fatal)
+    if (currentFixGame?.use_shortcut === true) {
+      updateProgress(99, 'Membuat shortcut di Desktop...');
+      try {
+        await autoCreateShortcut(gamePath);
+      } catch (e) {
+        // Non-fatal - shortcut gagal tidak menghentikan sukses fix
+      }
     }
     
     // Success
@@ -1344,7 +1398,60 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// Add Shortcut Process
+// Auto-create shortcut setelah proses fix selesai (dipanggil otomatis dari startFixGameProcess)
+// Jika exe_hint ada dan exact match ditemukan → langsung buat tanpa dialog pilih
+// Jika multipel tanpa hint yang jelas → tampilkan dialog pilih
+async function autoCreateShortcut(gamePath) {
+  const exeHint = currentFixGame?.exe_hint || null;
+  const gameName = currentFixGame?.title || 'Game';
+  
+  // Scan executables dengan exeHint
+  let executables;
+  try {
+    executables = await scanGameExecutables(gamePath, gameName, exeHint);
+  } catch (e) {
+    return; // Non-fatal: scan gagal, skip shortcut
+  }
+  
+  if (!executables || executables.length === 0) {
+    return; // Tidak ada exe ditemukan, skip
+  }
+  
+  let selectedExe = null;
+  
+  if (exeHint) {
+    // Ada exe_hint → pakai yang recommended (sudah dijamin C# meletakkan hint-match di atas)
+    const exactMatch = executables.find(e => e.recommended === true);
+    if (exactMatch) {
+      // Langsung buat shortcut tanpa dialog
+      selectedExe = exactMatch;
+    }
+  }
+  
+  if (!selectedExe && executables.length === 1) {
+    // Hanya 1 exe → langsung pakai tanpa tanya
+    selectedExe = executables[0];
+  }
+  
+  if (!selectedExe) {
+    // Beberapa exe tanpa hint yang jelas → tampilkan dialog pilih
+    selectedExe = await showExecutableSelectionDialog(executables, gameName);
+  }
+  
+  if (!selectedExe) {
+    return; // User cancel dialog, skip shortcut
+  }
+  
+  const shortcutName = `${gameName} - FIX`;
+  
+  try {
+    await createDesktopShortcut(selectedExe.path, shortcutName, gamePath);
+  } catch (e) {
+    // Non-fatal shortcut error
+  }
+}
+
+// Add Shortcut Process (tombol manual "Add Shortcut")
 async function startAddShortcutProcess() {
   if (!currentFixGame) {
     alert('Game data tidak tersedia!');
@@ -1436,7 +1543,7 @@ async function startAddShortcutProcess() {
 }
 
 // Scan executables in game folder
-async function scanGameExecutables(gamePath, gameTitle) {
+async function scanGameExecutables(gamePath, gameTitle, exeHint = null) {
   return new Promise((resolve, reject) => {
     if (!window.desktopBridge || typeof window.desktopBridge.send !== 'function') {
       reject(new Error('Desktop bridge tidak tersedia'));
@@ -1473,7 +1580,8 @@ async function scanGameExecutables(gamePath, gameTitle) {
     try {
       window.desktopBridge.send('FixGamesScanExecutables', {
         gamePath: gamePath,
-        gameTitle: gameTitle || ''
+        gameTitle: gameTitle || '',
+        exeHint: exeHint || null  // Kirim exe_hint dari fix_games.json ke C#
       });
     } catch (e) {
       clearTimeout(timeout);
