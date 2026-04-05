@@ -157,3 +157,6 @@ coverage/
 # (jika ada folder cache lokal)
 **/cache/
 **/.cache/
+
+
+api.json
