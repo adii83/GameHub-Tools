@@ -1,7 +1,7 @@
 {
-  "version": "2.0.1",
+  "version": "2.0.0",
   "publishedAt": "2026-03-02T15:11:44Z",
-  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v2.0.1/GameHubSetup.exe",
+  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v2.0.0/GameHubSetup.exe",
   "sha256": "REPLACE_WITH_REAL_SHA256",
   "mandatory": false,
   "releaseNotes": [
