@@ -13,6 +13,7 @@ namespace GameHubDesktop.Services
     public class UpdateService
     {
         private const string METADATA_URL = "https://raw.githubusercontent.com/adii83/GameHub-Tools/main/public/update/latest.json";
+        private const string LOCAL_UPDATE_TEST_ENV = "GAMEHUB_UPDATE_LOCAL_TEST";
         private const string USER_AGENT = "GameHub/1.0";
         private static readonly HttpClient Http = new HttpClient
         {
@@ -380,6 +381,33 @@ namespace GameHubDesktop.Services
 
         private async Task<UpdateMetadata> FetchMetadataAsync(CancellationToken cancellationToken)
         {
+            var localTestingEnabled = string.Equals(
+                Environment.GetEnvironmentVariable(LOCAL_UPDATE_TEST_ENV),
+                "1",
+                StringComparison.OrdinalIgnoreCase);
+
+            if (localTestingEnabled)
+            {
+                var localMetadataPath = Path.Combine(AppContext.BaseDirectory, "public", "update", "latest.json");
+                if (File.Exists(localMetadataPath))
+                {
+                    LogInfo($"Local update testing enabled via {LOCAL_UPDATE_TEST_ENV}=1");
+                    LogInfo($"Local metadata found: {localMetadataPath}");
+                    var localJson = await File.ReadAllTextAsync(localMetadataPath, cancellationToken).ConfigureAwait(false);
+                    var localMetadata = JsonSerializer.Deserialize<UpdateMetadata>(localJson, _jsonOptions);
+                    if (localMetadata != null)
+                    {
+                        LogInfo("Using local update metadata for testing");
+                        return localMetadata;
+                    }
+                    LogInfo("Local update metadata invalid, falling back to remote metadata");
+                }
+                else
+                {
+                    LogInfo($"Local update testing enabled, but file not found: {localMetadataPath}");
+                }
+            }
+
             using var request = new HttpRequestMessage(HttpMethod.Get, METADATA_URL);
             request.Headers.UserAgent.ParseAdd(USER_AGENT);
             using var response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);

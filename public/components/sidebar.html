@@ -40,11 +40,23 @@
     <div class="flex-1"></div>
 
     <button
-      onclick="navigate('settings')"
-      id="nav-settings"
+      onclick="if (window.desktopBridge && typeof window.desktopBridge.send === 'function') { window.desktopBridge.send('OpenDiscordInvite', { inviteUrl: 'https://discord.gg/PjYYT6hV' }); } else { window.open('https://discord.gg/PjYYT6hV', '_blank', 'noopener,noreferrer'); }"
+      id="nav-discord"
       class="mt-auto flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
     >
-      <i class="fa-solid fa-gear text-white"></i><span>Settings</span>
+      <i class="fa-brands fa-discord text-white"></i><span>Join Discord</span>
+    </button>
+
+    <button
+      onclick="navigate('settings')"
+      id="nav-settings"
+      class="flex items-center gap-3 px-3 py-2 rounded-md text-gray-300 hover:bg-white/5 hover:text-white transition"
+    >
+      <i class="fa-solid fa-gear text-white"></i>
+      <span class="flex items-center gap-2">
+        <span>Settings</span>
+        <span id="nav-settings-update-badge" class="hidden px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 border border-amber-400/40 text-amber-200">Update</span>
+      </span>
     </button>
   </nav>
 </div>

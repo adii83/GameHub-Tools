@@ -16,13 +16,42 @@
     if (!Array.isArray(games)) return;
     games.forEach((game, index) => {
       if (!game || typeof game !== 'object') return;
-      game.category = 'steam-account';
+      if (!game.category) {
+        game.category = 'steam-account';
+      }
       if (game.premium === undefined) {
         game.premium = false;
       }
       const fallback = `${game.appid || 'steam'}-${index}`;
       game.accountId = String(game.accountId || game.username || fallback);
     });
+  }
+
+  async function loadSteamGamesLocalFirst() {
+    const localCandidates = ['/data/steam_games.json', './data/steam_games.json', 'data/steam_games.json'];
+    for (const path of localCandidates) {
+      try {
+        const response = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' });
+        if (response.ok) {
+          const json = await response.json();
+          if (Array.isArray(json)) return json;
+        }
+      } catch (e) {}
+    }
+
+    if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+      const bridgeData = await window.desktopBridge.getSteamGamesData(false);
+      if (Array.isArray(bridgeData)) return bridgeData;
+    }
+
+    const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
+    const remoteResponse = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
+    if (remoteResponse.ok) {
+      const remoteJson = await remoteResponse.json();
+      if (Array.isArray(remoteJson)) return remoteJson;
+    }
+
+    return null;
   }
 
   // Filter by category
@@ -35,29 +64,19 @@
     });
     document.getElementById(`fix-category-${category}`)?.classList.add('active-category');
     
-    // If switching to steam-account, reload data with fresh check
-    if (category === 'steam-account') {
+    // If switching to steam-account or steam-sharing, reload data with fresh check
+    if (category === 'steam-account' || category === 'steam-sharing') {
       document.getElementById('fix-games-loading').classList.remove('hidden');
       document.getElementById('fix-games-empty').classList.add('hidden');
       
       try {
-        let json = null;
-        // Always load fresh for steam-account (with expired check via service)
-        if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-          json = await window.desktopBridge.getSteamGamesData(false); // false = check expired, load fresh if needed
-        } else {
-          const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
-          const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
-          if (response.ok) {
-            json = await response.json();
-          }
-        }
+        const json = await loadSteamGamesLocalFirst();
         
         if (Array.isArray(json)) {
-          // Validasi Steam Account games
+          // Validasi Steam Account / Steam Sharing games
           const validSteamGames = json.filter(game => {
             if (!game || typeof game !== 'object') return false;
-            // Steam Account games harus punya: appid, title, poster, username, password
+            // Steam account-type games harus punya: appid, title, poster, username, password
             return game.appid && game.title && game.poster && game.username && game.password;
           });
           
@@ -109,15 +128,7 @@
           let steamGamesJson = null;
           if (category === 'all') {
             try {
-              if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-                steamGamesJson = await window.desktopBridge.getSteamGamesData(false);
-              } else {
-                const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
-                const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
-                if (response.ok) {
-                  steamGamesJson = await response.json();
-                }
-              }
+              steamGamesJson = await loadSteamGamesLocalFirst();
             } catch (e) {
               // Error loading steam games - non-critical, continue with fix_games.json only
             }
@@ -247,8 +258,8 @@
 
       // OPTIMASI: Cek cache dulu sebelum load data
       // Untuk kategori "all", skip cache karena perlu merge dengan Steam Account data
-      // Hanya gunakan cache jika kategori adalah kategori fix games lainnya (bukan steam-account dan bukan all)
-      if (currentCategory !== 'steam-account' && currentCategory !== 'all' && window.FixGamesPageCache && window.FixGamesPageCache.isValid()) {
+      // Hanya gunakan cache jika kategori adalah kategori fix games biasa (bukan account-type Steam dan bukan all)
+      if (currentCategory !== 'steam-account' && currentCategory !== 'steam-sharing' && currentCategory !== 'all' && window.FixGamesPageCache && window.FixGamesPageCache.isValid()) {
         const cached = window.FixGamesPageCache.get();
         // Pastikan cache berisi fix_games.json data (bukan steam_games.json)
         // Cek dengan melihat apakah ada game dengan category selain 'steam-account'
@@ -280,22 +291,12 @@
       let json = null;
       
       try {
-        // Check if current category is steam-account
-        // HANYA load steam_games.json jika kategori EXPLICITLY adalah 'steam-account'
+        // Check if current category is Steam account-type
+        // HANYA load steam_games.json jika kategori EXPLICITLY adalah steam-account / steam-sharing
         // Untuk kategori 'all' atau kategori lainnya, load fix_games.json
-        if (currentCategory === 'steam-account') {
-          // Load steam_games.json for Steam Account category
-          if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-            json = await window.desktopBridge.getSteamGamesData(false);
-          } else {
-            // Fallback: direct fetch
-            const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
-            const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
-            }
-            json = await response.json();
-          }
+        if (currentCategory === 'steam-account' || currentCategory === 'steam-sharing') {
+          // Load steam_games.json for Steam account-type categories
+          json = await loadSteamGamesLocalFirst();
           
           // Steam games format: array langsung [ {...}, {...} ]
           if (Array.isArray(json)) {
@@ -312,10 +313,10 @@
               return titleA.localeCompare(titleB);
             });
             
-            // Validasi Steam Account games
+            // Validasi Steam Account / Steam Sharing games
             const validSteamGames = json.filter(game => {
               if (!game || typeof game !== 'object') return false;
-              // Steam Account games harus punya: appid, title, poster, username, password
+              // Steam account-type games harus punya: appid, title, poster, username, password
               return game.appid && game.title && game.poster && game.username && game.password;
             });
             
@@ -361,15 +362,7 @@
           let steamGamesJson = null;
           if (currentCategory === 'all') {
             try {
-              if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-                steamGamesJson = await window.desktopBridge.getSteamGamesData(false);
-              } else {
-                const STEAM_GAMES_URL = 'https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json';
-                const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
-                if (response.ok) {
-                  steamGamesJson = await response.json();
-                }
-              }
+              steamGamesJson = await loadSteamGamesLocalFirst();
             } catch (e) {
               // Error loading steam games - non-critical, continue with fix_games.json only
             }
@@ -422,10 +415,12 @@
                 return game.appid && game.title && game.poster && game.username && game.password;
               });
               
-              // Set category dan premium untuk Steam Account games
+              // Set category dan premium untuk Steam account-type games
               validSteamGames.forEach(game => {
                 if (game && typeof game === 'object') {
-                  game.category = 'steam-account';
+                  if (!game.category) {
+                    game.category = 'steam-account';
+                  }
                   if (game.premium === undefined) {
                     game.premium = false;
                   }
@@ -494,7 +489,14 @@
       
       // Category filter
       if (currentCategory !== 'all') {
-        if (!game.category || game.category !== currentCategory) {
+        if (!game.category) {
+          return false;
+        }
+        if (currentCategory === 'steam-account') {
+          if (game.category !== 'steam-account') {
+            return false;
+          }
+        } else if (game.category !== currentCategory) {
           return false;
         }
       }
@@ -567,7 +569,7 @@
       const posterUrl = game.poster || `https://steamcdn-a.akamaihd.net/steam/apps/${game.appid}/library_600x900.jpg`;
       
       // Check if this is Steam Account game (has username/password, no files)
-      const isSteamAccount = game.category === 'steam-account' && game.username && game.password;
+      const isSteamAccount = (game.category === 'steam-account' || game.category === 'steam-sharing') && game.username && game.password;
       
       // Validate required fields based on game type
       if (isSteamAccount) {
@@ -604,7 +606,7 @@
           <div class="absolute top-2 left-2 ${premiumColor} text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">
             ${premiumLabel}
           </div>
-          ${game.aktivasi_offline ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">AKTIVASI OFFLINE</div>` : (game.dapatkan_kode === true ? `<div class="absolute top-2 left-20 bg-purple-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">STEAM GUARD</div>` : '')}
+          ${game.aktivasi_offline ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">AKTIVASI OFFLINE</div>` : (game.category === 'steam-sharing' ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">STEAM SHARING</div>` : '')}
           <div class="fix-game-card-overlay">
             <div class="fix-game-card-title text-white">${escapeHtml(game.title || 'Unknown')}</div>
             <div class="fix-game-card-publisher">${escapeHtml(game.publisher || '')}</div>
@@ -636,8 +638,8 @@
       }
     }
 
-    // Cek apakah game dari kategori steam-account
-    const isSteamCategory = category === 'steam-account';
+    // Cek apakah game dari kategori Steam account-type
+    const isSteamCategory = category === 'steam-account' || category === 'steam-sharing';
     const game = fixGamesData.find(g => {
       if (!g || parseInt(g.appid, 10) !== parsedAppId) {
         return false;
@@ -645,12 +647,15 @@
       if (!isSteamCategory) {
         return true;
       }
+      if (category && g.category !== category) {
+        return false;
+      }
       if (!normalizedAccountId) {
-        return g.category === 'steam-account';
+        return g.category === category;
       }
       return String(g.accountId || g.username || '') === normalizedAccountId;
     });
-    const isSteamAccount = isSteamCategory || (game && game.category === 'steam-account');
+    const isSteamAccount = isSteamCategory || (game && (game.category === 'steam-account' || game.category === 'steam-sharing'));
     
     // Cek license dan premium status sebelum buka detail
     let licenseCheckPassed = false;
@@ -680,7 +685,7 @@
           return;
         }
         
-        // Untuk kategori steam-account, cek premium status
+        // Untuk kategori account-type Steam, cek premium status
         if (isSteamAccount) {
           // Jika game premium dan license masih standard, block akses Steam Account
           if (game.premium === true && licenseInfo.plan === 'standard') {
@@ -722,9 +727,10 @@
 
     if (!licenseCheckPassed) return;
     
-    // Navigate dengan flag untuk kategori steam-account
+    // Navigate dengan flag untuk kategori account-type Steam
     navigate('fix-games-detail', {
       appid: parsedAppId,
+      category: category || undefined,
       accountId: normalizedAccountId || undefined,
       isSteamAccount: isSteamAccount ? true : undefined
     });

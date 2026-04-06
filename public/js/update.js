@@ -192,8 +192,11 @@ const UpdatePanel = (() => {
     installMessage: '',
     lastError: null,
     autoChecked: false,
+    autoCheckBound: false,
     snapshotHydrated: false,
-    promptedVersion: null
+    promptedVersion: null,
+    homeReady: !!window.__gamehubHomeReady,
+    pendingPromptVersion: null
   };
 
   const elements = {
@@ -378,7 +381,47 @@ const UpdatePanel = (() => {
     }
   }
 
+  function updateSidebarBadge() {
+    const badge = document.getElementById('nav-settings-update-badge');
+    if (!badge) return;
+    badge.classList.toggle('hidden', !state.updateAvailable);
+  }
+
+  function navigateToSettings() {
+    try {
+      if (typeof window.navigate === 'function') {
+        window.navigate('settings');
+      }
+    } catch (e) {}
+  }
+
+  function showSettingsUpdatePrompt() {
+    if (!state.updateAvailable || !state.metadata?.version) return;
+    if (state.promptedVersion === state.metadata.version) return;
+
+    state.promptedVersion = state.metadata.version;
+    state.pendingPromptVersion = null;
+
+    const versionText = formatVersion(state.metadata.version);
+    const message = `Versi ${versionText} tersedia untuk GameHub.\n\nBuka halaman Settings sekarang untuk melihat detail update dan melanjutkan proses pemasangan?`;
+
+    if (typeof showPremiumModal === 'function') {
+      showPremiumModal({
+        title: 'Update Tersedia',
+        message,
+        type: 'confirm',
+        confirmText: 'Oke',
+        cancelText: 'Nanti',
+        showCancel: true,
+        onConfirm: () => navigateToSettings()
+      });
+    } else if (window.confirm(message)) {
+      navigateToSettings();
+    }
+  }
+
   function render() {
+    updateSidebarBadge();
     if (!ensureElements()) return;
     if (elements.currentVersion) {
       elements.currentVersion.textContent = formatVersion(state.currentVersion);
@@ -474,6 +517,7 @@ const UpdatePanel = (() => {
         state.lastError = null;
         if (!state.updateAvailable) {
           state.promptedVersion = null;
+          state.pendingPromptVersion = null;
         }
         if (state.updateAvailable) {
           maybePromptInstall(silent);
@@ -636,18 +680,12 @@ const UpdatePanel = (() => {
 
   function maybePromptInstall(silentMode) {
     if (!state.updateAvailable || !state.metadata?.version) return;
-    if (silentMode) {
-      if (typeof showPremiumToast === 'function') {
-        showPremiumToast(`Versi ${formatVersion(state.metadata.version)} siap dipasang. Buka Settings untuk memasang.`, 0, 'info');
-      }
+    if (!state.homeReady) {
+      state.pendingPromptVersion = state.metadata.version;
       return;
     }
 
-    if (state.promptedVersion === state.metadata.version) {
-      return;
-    }
-    state.promptedVersion = state.metadata.version;
-    requestInstall({ skipConfirm: false, autoPrompt: true });
+    showSettingsUpdatePrompt();
   }
 
   function scheduleAutoCheck() {
@@ -658,20 +696,43 @@ const UpdatePanel = (() => {
     }, 800);
   }
 
+  function bindHomeReadyAutoCheck() {
+    if (state.autoCheckBound) return;
+    state.autoCheckBound = true;
+
+    const onHomeReady = () => {
+      state.homeReady = true;
+      if (state.updateAvailable && state.pendingPromptVersion === state.metadata?.version) {
+        showSettingsUpdatePrompt();
+      }
+    };
+
+    try {
+      window.addEventListener('gamehub:home-ready', onHomeReady, { once: true });
+    } catch {
+      window.addEventListener('gamehub:home-ready', onHomeReady);
+    }
+
+    // Jika Home sudah sempat ready sebelum listener dipasang.
+    if (window.__gamehubHomeReady === true) {
+      state.homeReady = true;
+    }
+  }
+
   function mount() {
     if (!ensureElements()) {
       return false;
     }
     render();
     if (!state.snapshotHydrated) {
-      hydrateSnapshot().then(() => {
-        scheduleAutoCheck();
-      });
+      hydrateSnapshot();
     }
     return true;
   }
 
   function init(retry = 0) {
+    bindHomeReadyAutoCheck();
+    scheduleAutoCheck();
     if (mount()) return;
     if (retry < 5) {
       setTimeout(() => init(retry + 1), 200);

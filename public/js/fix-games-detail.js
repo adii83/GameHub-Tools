@@ -46,7 +46,9 @@ function normalizeSteamAccountGames(games) {
   if (!Array.isArray(games)) return;
   games.forEach((game, index) => {
     if (!game || typeof game !== 'object') return;
-    game.category = 'steam-account';
+    if (!game.category) {
+      game.category = 'steam-account';
+    }
     if (game.premium === undefined) {
       game.premium = false;
     }
@@ -55,13 +57,15 @@ function normalizeSteamAccountGames(games) {
   });
 }
 
-function selectSteamAccountGame(games, appidNum, accountId) {
+function selectSteamAccountGame(games, appidNum, accountId, selectedCategory = null) {
   if (!Array.isArray(games)) return null;
   const normalizedAccountId = accountId ? String(accountId) : null;
+  const normalizedCategory = selectedCategory ? String(selectedCategory) : null;
   for (const game of games) {
     if (!game) continue;
     const gAppid = typeof game.appid === 'string' ? parseInt(game.appid, 10) : game.appid;
     if (gAppid !== appidNum) continue;
+    if (normalizedCategory && game.category !== normalizedCategory) continue;
     if (!normalizedAccountId) return game;
     const candidateId = String(game.accountId || game.username || '');
     if (candidateId === normalizedAccountId) {
@@ -71,10 +75,42 @@ function selectSteamAccountGame(games, appidNum, accountId) {
   return null;
 }
 
+async function loadSteamGamesLocalFirst() {
+  const localCandidates = ['/data/steam_games.json', './data/steam_games.json', 'data/steam_games.json'];
+  for (const path of localCandidates) {
+    try {
+      const response = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' });
+      if (response.ok) {
+        const json = await response.json();
+        if (Array.isArray(json)) return json;
+      }
+    } catch (e) {}
+  }
+
+  if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+    try {
+      const bridgeData = await window.desktopBridge.getSteamGamesData(false);
+      if (Array.isArray(bridgeData)) return bridgeData;
+    } catch (e) {}
+  }
+
+  try {
+    const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
+    const remoteResponse = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
+    if (remoteResponse.ok) {
+      const remoteJson = await remoteResponse.json();
+      if (Array.isArray(remoteJson)) return remoteJson;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
 // Initialize detail page
-async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = null) {
+async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = null, selectedCategory = null) {
   currentAppId = appid;
   currentAccountId = accountId ? String(accountId) : null;
+  const normalizedSelectedCategory = selectedCategory ? String(selectedCategory) : null;
   isProcessing = false;
   
   try {
@@ -97,7 +133,7 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
       
       while (!gameData && retryCount < maxRetries) {
         if (typeof window.steamGamesData !== 'undefined' && Array.isArray(window.steamGamesData) && window.steamGamesData.length > 0) {
-          gameData = selectSteamAccountGame(window.steamGamesData, appidNum, currentAccountId);
+          gameData = selectSteamAccountGame(window.steamGamesData, appidNum, currentAccountId, normalizedSelectedCategory);
         }
         
         if (gameData) break;
@@ -108,18 +144,14 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
         retryCount++;
       }
       
-      // Fallback: load from GitHub
+      // Fallback: load local file / bridge / remote
       if (!gameData) {
-        const STEAM_GAMES_URL = `https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`;
         try {
-          const response = await fetch(STEAM_GAMES_URL, { cache: 'no-store' });
-          if (response.ok) {
-            const json = await response.json();
-            if (Array.isArray(json)) {
-              normalizeSteamAccountGames(json);
-              window.steamGamesData = json;
-              gameData = selectSteamAccountGame(json, appidNum, currentAccountId);
-            }
+          const json = await loadSteamGamesLocalFirst();
+          if (Array.isArray(json)) {
+            normalizeSteamAccountGames(json);
+            window.steamGamesData = json;
+            gameData = selectSteamAccountGame(json, appidNum, currentAccountId, normalizedSelectedCategory);
           }
         } catch (e) {
           // Error loading game data - handled silently
@@ -221,8 +253,8 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
     if (isSteamAccount) {
       renderSteamAccountDetail(gameData);
       
-      // Auto-show Notifikasi Peringatan jika Steam Guard aktif
-      if (gameData.dapatkan_kode) {
+      // Auto-show notifikasi sesuai kategori akun Steam
+      if (gameData.category === 'steam-sharing') {
          if (typeof window.showPremiumModal === 'function') {
             setTimeout(() => {
               window.showPremiumModal({
@@ -234,6 +266,19 @@ async function initFixGameDetailPage(appid, isSteamAccount = false, accountId = 
             }, 300); // Slight delay for smoother rendering
          } else {
             alert('⚠️ PERHATIAN!\n\n• Akun ini adalah akun sharing.\n• Saat login, wajib centang opsi "Remember Me / Ingat Saya" agar akun tidak perlu melakukan verifikasi kode ulang di kemudian hari.\n• Mohon untuk membaca dan mengikuti seluruh instruksi yang tertera pada halaman ini dengan teliti sebelum melanjutkan proses login.\n• Terima kasih atas kerja samanya.');
+         }
+      } else if (gameData.category === 'steam-account') {
+         if (typeof window.showPremiumModal === 'function') {
+            setTimeout(() => {
+              window.showPremiumModal({
+                title: '⚠️ PERHATIAN',
+                message: '• Game bisa dimainkan di akun pribadi kalian masing-masing.\n• Gunakan akun ini sebagai akun pancingan seperti di video tutorial.',
+                type: 'warning',
+                confirmText: 'SAYA MENGERTI'
+              });
+            }, 300);
+         } else {
+            alert('⚠️ PERHATIAN\n\n• Game bisa dimainkan di akun pribadi kalian masing-masing.\n• Gunakan akun ini sebagai akun pancingan seperti di video tutorial.');
          }
       }
     } else {
@@ -1136,6 +1181,155 @@ function renderSteamAccountDetail(game) {
     // Add account info section
     const accountSection = document.createElement('div');
     accountSection.className = 'space-y-4';
+    const isSteamSharing = game.category === 'steam-sharing';
+    const hasVerificationCode = game.dapatkan_kode === true;
+
+    const steamSharingInstructionHtml = `
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg pb-2 mb-6 shadow-lg overflow-hidden">
+          <div class="bg-blue-600/20 px-4 py-3 border-b border-blue-500/30 flex items-center gap-2 mb-5">
+            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span class="text-blue-400 font-bold text-sm tracking-wide">⚠️ Mohon Dibaca Sampai Tuntas Demi Kenyamanan Bersama</span>
+          </div>
+
+          <div class="space-y-5 px-5 pb-4 text-sm text-gray-300">
+            <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+              <p class="text-white leading-relaxed"><span class="font-semibold text-amber-200">Catatan:</span> Karena ini akun sharing, game hanya bisa dijalankan dari akun ini dan <span class="font-bold text-red-400">tidak dapat dimainkan dari akun pribadi Anda.</span></p>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-blue-600/80 text-white text-xs font-bold flex items-center justify-center">1</span><h4 class="font-bold text-white text-base">Login ke Akun Steam</h4></div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Login menggunakan username dan password yang sudah disediakan (copy-paste).</li>
+                <li>Wajib centang <span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-medium">Remember Me / Ingat Saya</span>.</li>
+                ${hasVerificationCode ? '<li>Jika diminta kode verifikasi, gunakan tombol Dapatkan Kode.</li>' : ''}
+              </ul>
+              ${hasVerificationCode ? `
+              <div class="mt-3 ml-8 bg-[#1a1a1a] p-3 rounded-xl border border-blue-500/30 flex items-center justify-between shadow-inner">
+                <span class="text-xs text-blue-300 font-medium">Butuh kode Steam Sharing untuk login?</span>
+                <button onclick="window.getSteamGuardCode('${escapeHtml(game.username || '')}')" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(37,99,235,0.4)]">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                  Dapatkan Kode
+                </button>
+              </div>
+              ` : ''}
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-blue-600/80 text-white text-xs font-bold flex items-center justify-center">2</span><h4 class="font-bold text-white text-base">Install Game</h4></div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Jika game belum terpasang, silakan install terlebih dahulu.</li>
+                <li>Bisa diinstall langsung dari akun ini, atau dari akun yang sudah Anda tambahkan gamenya melalui tools yang tersedia.</li>
+              </ul>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-blue-600/80 text-white text-xs font-bold flex items-center justify-center">3</span><h4 class="font-bold text-white text-base">Jalankan Game</h4></div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Buka (Play) game tersebut.</li>
+                <li>Tunggu sampai muncul logo Game tersebut.</li>
+              </ul>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-blue-600/80 text-white text-xs font-bold flex items-center justify-center">4</span><h4 class="font-bold text-white text-base">Keluar dari Game</h4></div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Setelah logo game muncul, segera keluar dari game.</li>
+                <li>Gunakan <kbd class="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded border border-gray-700 text-xs font-mono">Alt + F4</kbd> untuk keluar dengan cepat.</li>
+              </ul>
+            </div>
+
+            <div class="bg-red-500/10 border-l-4 border-red-500 border-t border-r border-b border-red-500/20 rounded-r-lg p-4 ml-2 shadow-lg shadow-red-500/5">
+              <div class="flex items-center gap-2 mb-2"><span class="text-lg">5️⃣</span><h4 class="font-bold text-red-400 text-base">⚠️ PENTING – Aktifkan Offline Mode</h4></div>
+              <ul class="list-disc list-outside ml-7 space-y-1.5 text-gray-300 leading-relaxed">
+                <li>Setelah keluar dari game, <strong>WAJIB ubah Steam ke OFFLINE MODE</strong> dari akun ini.</li>
+                <li>Pastikan benar-benar sudah dalam mode offline sebelum melanjutkan.</li>
+              </ul>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-blue-600/80 text-white text-xs font-bold flex items-center justify-center">6</span><h4 class="font-bold text-white text-base">Mainkan Game</h4></div>
+              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-300 leading-relaxed"><li>Jalankan kembali game dari akun tersebut.</li></ul>
+            </div>
+          </div>
+        </div>
+    `;
+
+    const steamAccountWithCodeHtml = `
+        <div class="bg-green-500/10 border border-green-500/20 rounded-lg pb-2 mb-6 shadow-lg overflow-hidden">
+          <div class="bg-green-600/20 px-4 py-3 border-b border-green-500/30 flex items-center gap-2 mb-5">
+            <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span class="text-green-400 font-bold text-sm tracking-wide">⚠️ Mohon Dibaca Sampai Tuntas Demi Kenyamanan Bersama</span>
+          </div>
+          <div class="space-y-5 px-5 pb-4 text-sm text-gray-200">
+            <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+              <p class="text-white leading-relaxed"><span class="font-semibold text-amber-200">Catatan:</span> Game bisa dimainkan di akun pribadi kalian masing-masing. <span class="text-red-400">Gunakan akun ini sebagai akun pancingan seperti di video tutorial.</span></p>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">1</span><p class="text-gray-100">Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">2</span><p class="text-gray-100">Jangan lupa centang <span class="bg-green-500/20 text-green-300 px-2 py-0.5 rounded font-medium">Remember Me</span>.</p></div>
+            </div>
+
+            <div class="mt-2 ml-2 bg-[#1a1a1a] p-3 rounded-xl border border-green-500/30 shadow-inner">
+              <p class="text-sm text-green-200 font-semibold mb-2">📌 Dapatkan Kode Verifikasi</p>
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p class="text-xs text-gray-300">Jika diminta kode verifikasi 2FA saat login, klik tombol di samping untuk mendapatkannya.</p>
+                <button onclick="window.getSteamGuardCode('${escapeHtml(game.username || '')}')" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(34,197,94,0.35)] sm:shrink-0">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                  Dapatkan Kode
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-3 text-gray-100 leading-relaxed">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">3</span><p>Cek apakah ada game yang sesuai di library akun tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">4</span><p>Jika ada game, logout dan kembali ke akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">5</span><p>Add game tersebut ke library akun pribadi kalian terlebih dahulu.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">6</span><p>Download game seperti biasa di akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">7</span><p>Setelah download selesai, login kembali ke akun Steam tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">8</span><p>Jalankan game dari akun tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">9</span><p>Biarkan game berjalan sampai masuk ke menu utama game.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">10</span><p>Setelah masuk menu utama, tutup game dengan menekan <kbd class="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded border border-gray-700 text-xs font-mono">Alt + F4</kbd>.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">11</span><p>Logout dari akun tersebut dan kembali ke akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">12</span><p>Mainkan game dari akun pribadi kalian seperti biasa.</p></div>
+            </div>
+          </div>
+        </div>
+    `;
+
+    const steamAccountNoCodeHtml = `
+        <div class="bg-green-500/10 border border-green-500/20 rounded-lg pb-2 mb-6 shadow-lg overflow-hidden">
+          <div class="bg-green-600/20 px-4 py-3 border-b border-green-500/30 flex items-center gap-2 mb-5">
+            <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span class="text-green-400 font-bold text-sm tracking-wide">⚠️ Mohon Dibaca Sampai Tuntas Demi Kenyamanan Bersama</span>
+          </div>
+          <div class="space-y-5 px-5 pb-4 text-sm text-gray-200">
+            <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+              <p class="text-white leading-relaxed"><span class="font-semibold text-amber-200">Catatan:</span> Game bisa dimainkan di akun pribadi kalian masing-masing. <span class="text-red-400">Gunakan akun ini sebagai akun pancingan seperti di video tutorial.</span></p>
+            </div>
+
+            <div class="space-y-3 text-gray-100 leading-relaxed">
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">1</span><p>Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">2</span><p>Jangan lupa centang <span class="bg-green-500/20 text-green-300 px-2 py-0.5 rounded font-medium">Remember Me</span>.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">3</span><p>Cek apakah ada game yang sesuai di library akun tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">4</span><p>Jika ada game, logout dan kembali ke akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">5</span><p>Add game tersebut ke library akun pribadi kalian terlebih dahulu.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">6</span><p>Download game seperti biasa di akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">7</span><p>Setelah download selesai, login kembali ke akun Steam tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">8</span><p>Jalankan game dari akun tersebut.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">9</span><p>Biarkan game berjalan sampai masuk ke menu utama game.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">10</span><p>Setelah masuk menu utama, tutup game dengan menekan <kbd class="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded border border-gray-700 text-xs font-mono">Alt + F4</kbd>.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">11</span><p>Logout dari akun tersebut dan kembali ke akun pribadi kalian.</p></div>
+              <div class="flex items-center gap-3"><span class="w-6 h-6 rounded bg-green-600/80 text-white text-xs font-bold flex items-center justify-center">12</span><p>Mainkan game dari akun pribadi kalian seperti biasa.</p></div>
+            </div>
+          </div>
+        </div>
+    `;
+
+    const instructionUsageHtml = isSteamSharing
+      ? steamSharingInstructionHtml
+      : (hasVerificationCode ? steamAccountWithCodeHtml : steamAccountNoCodeHtml);
+
     accountSection.innerHTML = `
       <div>
         <h3 class="text-lg font-semibold mb-3">Account</h3>
@@ -1180,119 +1374,7 @@ function renderSteamAccountDetail(game) {
           </div>
         </div>
         <h3 class="text-lg font-semibold mb-3">Instruksi Penggunaan</h3>
-        ${game.dapatkan_kode ? `
-        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg pb-2 mb-6 shadow-lg overflow-hidden">
-          <div class="bg-blue-600/20 px-4 py-3 border-b border-blue-500/30 flex items-center gap-2 mb-5">
-            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-            <span class="text-blue-400 font-bold text-sm tracking-wide">⚠️ Mohon Dibaca Sampai Tuntas Demi Kenyamanan Bersama</span>
-          </div>
-          
-          <div class="space-y-6 px-5 pb-4 text-sm text-gray-300">
-            <!-- 1. Login ke Akun Steam -->
-            <div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">1️⃣</span>
-                <h4 class="font-bold text-white text-base">Login ke Akun Steam</h4>
-              </div>
-              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
-                <li>Login menggunakan username dan password yang sudah disediakan (copy–paste).</li>
-                <li>Wajib centang <span class="bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-medium">“Remember Me / Ingat Saya”</span> agar tidak perlu verifikasi ulang.</li>
-                <li>Silakan ambil kode verifikasi melalui tombol “Dapatkan Kode” yang telah disediakan.</li>
-              </ul>
-              <div class="mt-4 ml-8 bg-[#1a1a1a] p-3 rounded-xl border border-blue-500/30 flex items-center justify-between shadow-inner">
-                 <span class="text-xs text-blue-300 font-medium">Butuh kode Steam Guard untuk login?</span>
-                 <button onclick="window.getSteamGuardCode('${escapeHtml(game.username || '')}')" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 transition-all shadow-[0_0_10px_rgba(37,99,235,0.4)]">
-                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
-                   Dapatkan Kode
-                 </button>
-              </div>
-            </div>
-
-            <!-- 2. Install Game -->
-            <div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">2️⃣</span>
-                <h4 class="font-bold text-white text-base">Install Game</h4>
-              </div>
-              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
-                <li>Jika game belum terpasang, silakan install terlebih dahulu.</li>
-                <li>Bisa diinstall langsung dari akun ini, atau dari akun yang sudah Anda tambahkan gamenya melalui tools yang tersedia.</li>
-              </ul>
-            </div>
-
-            <!-- 3. Jalankan Game -->
-            <div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">3️⃣</span>
-                <h4 class="font-bold text-white text-base">Jalankan Game</h4>
-              </div>
-              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
-                <li>Buka (Play) game tersebut.</li>
-                <li>Tunggu sampai muncul logo Game Tersebut.</li>
-              </ul>
-            </div>
-
-            <!-- 4. Keluar dari Game -->
-            <div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">4️⃣</span>
-                <h4 class="font-bold text-white text-base">Keluar dari Game</h4>
-              </div>
-              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
-                <li>Setelah logo Game tersebut muncul, segera keluar dari game.</li>
-                <li>Gunakan <kbd class="bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded border border-gray-700 text-xs font-mono">Alt + F4</kbd> untuk keluar dengan cepat.</li>
-              </ul>
-            </div>
-
-            <!-- 5. PENTING Offline Mode -->
-            <div class="bg-red-500/10 border-l-4 border-red-500 border-t border-r border-b border-red-500/20 rounded-r-lg p-4 ml-2 shadow-lg shadow-red-500/5">
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">5️⃣</span>
-                <h4 class="font-bold text-red-400 text-base">⚠️ PENTING – Aktifkan Offline Mode</h4>
-              </div>
-              <ul class="list-disc list-outside ml-7 space-y-1.5 text-gray-300 leading-relaxed">
-                <li>Setelah keluar dari game, <strong>WAJIB ubah Steam ke OFFLINE MODE</strong> dari akun ini.</li>
-                <li>Pastikan benar-benar sudah dalam mode offline sebelum melanjutkan.</li>
-              </ul>
-            </div>
-
-            <!-- 6. Mainkan Game -->
-            <div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-lg">6️⃣</span>
-                <h4 class="font-bold text-white text-base">Mainkan Game</h4>
-              </div>
-              <ul class="list-disc list-outside ml-9 space-y-1.5 text-gray-400 leading-relaxed">
-                <li>Jalankan kembali game dari akun tersebut.</li>
-                <li><span class="text-yellow-400 font-semibold">Catatan:</span> Karena ini akun sharing, game hanya bisa dijalankan dari akun ini dan <span class="text-red-300">tidak dapat dimainkan dari akun pribadi Anda</span>.</li>
-              </ul>
-            </div>
-            
-          </div>
-        </div>
-        ` : `
-        <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-4 mb-4">
-          <p class="text-green-400 font-semibold mb-3">Jika berhasil Login ikuti instruksi dibawah ini:</p>
-          <ol class="text-gray-300 text-sm space-y-2.5 list-decimal list-inside leading-relaxed">
-            <li class="flex flex-col gap-2">
-              <span>Login ke akun Steam tersebut menggunakan username dan password yang sudah di-copy.</span>
-            </li>
-            <li>Cek apakah ada game yang sesuai di library akun tersebut.</li>
-            <li>Jika ada game, logout dan kembali ke akun pribadi kalian.</li>
-            <li>Add game tersebut ke library akun pribadi kalian terlebih dahulu.</li>
-            <li>Download game seperti biasa di akun pribadi kalian.</li>
-            <li>Setelah download selesai, login kembali ke akun Steam tersebut.</li>
-            <li class="font-bold text-yellow-400 text-base mt-3 mb-3 bg-yellow-500/20 px-3 py-2 rounded border border-yellow-500/40">
-              ⚠️ PENTING: Setelah login, pastikan Steam kalian dalam mode <span class="bg-yellow-500/30 px-2 py-1 rounded font-bold">OFFLINE MODE (WAJIB!!!)</span>
-            </li>
-            <li>Jalankan game dari akun tersebut.</li>
-            <li>Biarkan game berjalan sampai masuk ke menu utama game.</li>
-            <li>Setelah masuk menu utama, tutup game dengan menekan <span class="font-mono bg-white/10 px-2 py-0.5 rounded">Alt + F4</span>.</li>
-            <li>Logout dari akun tersebut dan kembali ke akun pribadi kalian.</li>
-            <li>Mainkan game dari akun pribadi kalian seperti biasa.</li>
-          </ol>
-        </div>
-        `}
+        ${instructionUsageHtml}
       </div>
     `;
     

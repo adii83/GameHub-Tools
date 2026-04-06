@@ -1,17 +1,15 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publishedAt": "2026-03-02T15:11:44Z",
-  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v2.0.0/GameHubSetup.exe",
-  "sha256": "14E512531EECA73C7E415C48B6AA5E0C465A9E10D12BF9AB008D84A90906195E",
+  "downloadUrl": "https://github.com/adii83/GameHub-Tools/releases/download/v2.0.1/GameHubSetup.exe",
+  "sha256": "REPLACE_WITH_REAL_SHA256",
   "mandatory": false,
   "releaseNotes": [
-  "Major update: UI/UX yang lebih baik dan modern",
-  "Fitur baru: Pembuatan shortcut Desktop otomatis setelah proses fix selesai",
-  "Fitur baru: Auto Get Steam Guard Code",
-  "Fitur baru: Indikator metode jalankan game (Steam / Shortcut Desktop)",
-  "Peningkatan: Deteksi executable game lebih presisi",
-  "Perbaikan: Berbagai bug di halaman Games, filter, dan panel game",
-  "Peningkatan: Penanganan game Denuvo lebih akurat"
+    "Perbaikan: Alur Steam Account pada Fix Games lebih stabil",
+    "Penambahan: Kategori Steam Sharing dipisah dari Steam Account",
+    "Perbaikan: Badge dan detail game disesuaikan per kategori",
+    "Perbaikan: Notifikasi update dan cek update lebih konsisten",
+    "Peningkatan: Stabilitas desktop bridge dan WebView"
 ]
 
 }

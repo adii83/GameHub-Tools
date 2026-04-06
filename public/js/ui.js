@@ -974,7 +974,7 @@ function ensureUnavailableOverlay() {
             <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
           </div>
           <div>
-            <h3 class="text-base font-bold text-white mb-1">Game Belum Dapat Dimainkan</h3>
+            <h3 id="gh-unavail-title" class="text-base font-bold text-white mb-1">Game Belum Dapat Dimainkan</h3>
             <span id="gh-unavail-badge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold bg-red-600/80 text-white border border-red-500/30">
               <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
               DENUVO
@@ -982,7 +982,7 @@ function ensureUnavailableOverlay() {
           </div>
         </div>
         <p id="gh-unavail-desc" class="text-sm text-gray-300 mb-5 leading-relaxed">Game ini menggunakan proteksi Denuvo dan saat ini belum tersedia di daftar Fix Games maupun Steam Account kami.</p>
-        <div class="text-xs text-gray-500 bg-white/5 rounded-lg px-4 py-3 mb-5 border border-white/5">
+        <div id="gh-unavail-note" class="text-xs text-gray-500 bg-white/5 rounded-lg px-4 py-3 mb-5 border border-white/5">
           💡 Game dengan proteksi Denuvo memerlukan patch khusus. Pantau terus halaman <strong class="text-gray-300">Fix Games</strong> untuk melihat update ketersediaannya.
         </div>
         <div class="flex justify-end">
@@ -997,11 +997,22 @@ function ensureUnavailableOverlay() {
   // Close on backdrop click
   el.querySelector('.absolute.inset-0')?.addEventListener('click', () => hideUnavailableOverlay());
 }
-function showUnavailableOverlay(message) {
+function showUnavailableOverlay(message, mode = 'general') {
   ensureUnavailableOverlay();
   const wrap = document.getElementById('gh-unavail-overlay');
+  const title = document.getElementById('gh-unavail-title');
+  const badge = document.getElementById('gh-unavail-badge');
   const desc = document.getElementById('gh-unavail-desc');
+  const note = document.getElementById('gh-unavail-note');
+  const isDenuvo = mode === 'denuvo';
+  if (title) title.textContent = isDenuvo ? 'Game Belum Dapat Dimainkan' : 'Game Belum Tersedia';
+  if (badge) badge.classList.toggle('hidden', !isDenuvo);
   if (desc && message) desc.textContent = message;
+  if (note) {
+    note.innerHTML = isDenuvo
+      ? '💡 Game dengan proteksi <b>Denuvo</b> memerlukan patch khusus. Pantau terus halaman <b>Fix Games</b> untuk melihat update ketersediaannya.'
+      : 'Silakan request ke admin melalui WhatsApp atau forum Discord yang sudah disediakan.';
+  }
   if (wrap) wrap.classList.remove('hidden');
 }
 function hideUnavailableOverlay() {
@@ -1128,7 +1139,7 @@ function onAddGame(appid, name) {
     console.log(`[onAddGame] Denuvo check appid=${appid}: fixAvail=${isFixAvailable} steamAvail=${isSteamAvailable} (fixGames=${fixGames.length} steamGames=${steamGames.length} processedData=${window.processedOriginalData?.length || 0})`);
     
     if (!isFixAvailable && !isSteamAvailable) {
-      showUnavailableOverlay('Game ini menggunakan proteksi Denuvo dan saat ini belum tersedia di daftar Fix Games maupun Steam Account kami.');
+      showUnavailableOverlay('Game ini menggunakan proteksi Denuvo dan saat ini belum tersedia di daftar Fix Games maupun Steam Account kami.', 'denuvo');
       return;
     }
   }
@@ -1379,7 +1390,7 @@ window.handleTrashClick = handleTrashClick;
             const isUnavailable = /semua api gagal|tidak tersedia|not available|unavailable/i.test(err);
             if (isUnavailable) {
               hideProgressOverlay();
-              showUnavailableOverlay('Game Masih Belum Tersedia.');
+              showUnavailableOverlay('Game belum tersedia.', 'general');
             } else {
               updateProgressOverlay({ phase: 'Gagal', percent: 0, status: err });
               setTimeout(() => hideProgressOverlay(), 900);

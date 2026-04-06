@@ -233,6 +233,7 @@ async function navigate(page, params = {}) {
     // Get appid from navigate params
     const navigateParams = window._lastNavigateParams || {};
     const appid = navigateParams.appid;
+    const category = navigateParams.category || params.category || null;
     const accountId = navigateParams.accountId || params.accountId;
     
     if (!appid) {
@@ -248,7 +249,7 @@ async function navigate(page, params = {}) {
       script.onload = () => {
         setTimeout(() => {
           if (typeof initFixGameDetailPage === 'function') {
-            initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null);
+            initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null, category);
           }
         }, 50);
       };
@@ -256,7 +257,7 @@ async function navigate(page, params = {}) {
     } else {
       setTimeout(() => {
         if (typeof initFixGameDetailPage === 'function') {
-          initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null);
+          initFixGameDetailPage(parseInt(appid), isSteamAccount, accountId || null, category);
         }
       }, 50);
     }
@@ -431,19 +432,49 @@ function setLoadingStatus(text) {
   } catch(e) {}
 }
 
+async function loadSteamGamesLocalFirst() {
+  const localCandidates = ['/data/steam_games.json', './data/steam_games.json', 'data/steam_games.json'];
+  for (const path of localCandidates) {
+    try {
+      const res = await fetch(`${path}?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json)) return json;
+      }
+    } catch (e) {}
+  }
+
+  if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+    try {
+      const bridgeData = await window.desktopBridge.getSteamGamesData(false);
+      if (Array.isArray(bridgeData)) return bridgeData;
+    } catch (e) {}
+  }
+
+  try {
+    const remoteRes = await fetch(`https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (remoteRes.ok) {
+      const remoteJson = await remoteRes.json();
+      if (Array.isArray(remoteJson)) return remoteJson;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
 // Initialize app and load essential data
 async function initApp() {
   try {
-    console.log('[initApp] Step 1: Fetching SteamGamesData from bridge/cache...');
+    console.log('[initApp] Step 1: Fetching SteamGamesData (local-first)...');
     setLoadingStatus('Memuat data akun game...');
     // Predownload essential data caches
     try {
-      if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-        const acc = await window.desktopBridge.getSteamGamesData(false);
-        if (acc && Array.isArray(acc)) window.steamGamesData = acc;
-        console.log('[initApp] SteamGamesData loaded from bridge, count:', window.steamGamesData?.length || 0);
+      const acc = await loadSteamGamesLocalFirst();
+      if (acc && Array.isArray(acc)) {
+        window.steamGamesData = acc;
+        console.log('[initApp] SteamGamesData loaded, count:', window.steamGamesData?.length || 0);
       } else {
-        console.log('[initApp] No bridge, skipping SteamGamesData prefetch');
+        console.log('[initApp] SteamGamesData unavailable during prefetch');
       }
     } catch (e) {
       console.warn('[initApp] Failed caching steam games data at startup:', e);

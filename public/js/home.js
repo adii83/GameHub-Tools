@@ -31,6 +31,8 @@ async function initHomePage() {
     loadingScreen.classList.add('opacity-0');
     setTimeout(() => loadingScreen.classList.add('hidden'), 500);
   }
+  window.__gamehubHomeReady = true;
+  window.dispatchEvent(new CustomEvent('gamehub:home-ready'));
   console.log('[Home] done.');
 }
 
@@ -49,6 +51,60 @@ async function fetchWithTimeout(url, timeoutMs = 15000) {
   }
 }
 
+async function loadNewFixGamesLocalFirst() {
+  try {
+    const localRes = await fetch(`./data/new_fix_games.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (localRes.ok) return await localRes.json();
+  } catch (e) {}
+
+  if (window.desktopBridge && typeof window.desktopBridge.getNewFixGamesData === 'function') {
+    const bridgeData = await window.desktopBridge.getNewFixGamesData(false);
+    if (Array.isArray(bridgeData)) return bridgeData;
+  }
+
+  const remoteRes = await fetchWithTimeout(`https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/new_fix_games.json?t=${Date.now()}`);
+  if (remoteRes && remoteRes.ok) return await remoteRes.json();
+  return [];
+}
+
+async function loadFixGamesLocalFirst() {
+  try {
+    const localRes = await fetch(`./data/fix_games.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (localRes.ok) {
+      const localData = await localRes.json();
+      return Array.isArray(localData) ? localData : (localData?.games || []);
+    }
+  } catch (e) {}
+
+  if (window.desktopBridge && typeof window.desktopBridge.getFixGamesData === 'function') {
+    const bridgeData = await window.desktopBridge.getFixGamesData(false);
+    return Array.isArray(bridgeData) ? bridgeData : (bridgeData?.games || []);
+  }
+
+  const remoteRes = await fetchWithTimeout(`https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/fix_games.json?t=${Date.now()}`);
+  if (remoteRes && remoteRes.ok) {
+    const remoteData = await remoteRes.json();
+    return Array.isArray(remoteData) ? remoteData : (remoteData?.games || []);
+  }
+  return [];
+}
+
+async function loadSteamGamesLocalFirst() {
+  try {
+    const localRes = await fetch(`./data/steam_games.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (localRes.ok) return await localRes.json();
+  } catch (e) {}
+
+  if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
+    const bridgeData = await window.desktopBridge.getSteamGamesData(false);
+    if (Array.isArray(bridgeData)) return bridgeData;
+  }
+
+  const remoteRes = await fetchWithTimeout(`https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`);
+  if (remoteRes && remoteRes.ok) return await remoteRes.json();
+  return [];
+}
+
 /**
  * 1. MENGAMBIL NEW FIX GAMES (SLIDER)
  * Membaca new_fix_games.json lalu mencocokannya dengan fix_games.json / steam_games.json
@@ -60,12 +116,7 @@ async function loadNewFixGames() {
   try {
     let newFixAppIds = window._newFixGamesIds;
     if (!newFixAppIds || newFixAppIds.length === 0) {
-      if (window.desktopBridge && typeof window.desktopBridge.getNewFixGamesData === 'function') {
-        newFixAppIds = await window.desktopBridge.getNewFixGamesData(false);
-      } else {
-        const resList = await fetchWithTimeout('https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/new_fix_games.json');
-        if (resList && resList.ok) newFixAppIds = await resList.json();
-      }
+      newFixAppIds = await loadNewFixGamesLocalFirst();
       window._newFixGamesIds = newFixAppIds;
     }
 
@@ -76,31 +127,13 @@ async function loadNewFixGames() {
     }
 
     if (!fixGamesJson || !Array.isArray(fixGamesJson) || fixGamesJson.length === 0) {
-      if (window.desktopBridge && typeof window.desktopBridge.getFixGamesData === 'function') {
-        const fix = await window.desktopBridge.getFixGamesData(false);
-        fixGamesJson = Array.isArray(fix) ? fix : (fix?.games || []);
-      } else {
-        const fixGamesRes = await fetchWithTimeout('https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/fix_games.json');
-        if (fixGamesRes && fixGamesRes.ok) {
-           const fix = await fixGamesRes.json();
-           fixGamesJson = Array.isArray(fix) ? fix : (fix?.games || []);
-        }
-      }
+      fixGamesJson = await loadFixGamesLocalFirst();
       window._fixGamesData = fixGamesJson;
     }
 
     let steamGamesJson = window.steamGamesData;
     if (!steamGamesJson) {
-      if (window.desktopBridge && typeof window.desktopBridge.getSteamGamesData === 'function') {
-        steamGamesJson = await window.desktopBridge.getSteamGamesData(false);
-      } else {
-      try {
-        const steamGamesRes = await fetchWithTimeout(`https://raw.githubusercontent.com/adii83/steam-metadata-archive/main/steam_games/steam_games.json?t=${Date.now()}`);
-        if (steamGamesRes && steamGamesRes.ok) {
-          steamGamesJson = await steamGamesRes.json();
-        }
-      } catch (error) { console.error('Error fetching steam_games.json:', error); }
-      }
+      steamGamesJson = await loadSteamGamesLocalFirst();
       window.steamGamesData = steamGamesJson;
     }
 
@@ -147,18 +180,18 @@ function renderNewFixGames(games) {
     const premiumColor = isPremium ? "bg-yellow-500 text-black px-2 py-[2px]" : "bg-gray-600 text-white px-2 py-[2px]";
     
     // Explicitly mirror Fix Games class names and padding
-    const offlineBadgeHtml = game.aktivasi_offline 
-      ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">AKTIVASI OFFLINE</div>` 
-      : (game.dapatkan_kode === true ? `<div class="absolute top-2 left-20 bg-purple-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">STEAM GUARD</div>` : '');
+    const offlineBadgeHtml = game.aktivasi_offline
+      ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">AKTIVASI OFFLINE</div>`
+      : (game.category === 'steam-sharing' ? `<div class="absolute top-2 left-20 bg-blue-600 text-white text-[10px] px-2 py-[2px] rounded-md font-semibold shadow z-10">STEAM SHARING</div>` : '');
 
     const numericAppId = Number(game.appid) || 0;
-    const accountIdentifier = (game.category === 'steam-account') ? (game.accountId || game.username || `${game.appid || ''}`) : '';
-    const encodedCategory = encodeURIComponent(String(game.category || ''));
+    const isSteamCategory = game.category === 'steam-account' || game.category === 'steam-sharing';
+    const accountIdentifier = isSteamCategory ? (game.accountId || game.username || `${game.appid || ''}`) : '';
     const encodedAccountId = encodeURIComponent(String(accountIdentifier || ''));
 
     const html = `
       <div class="flex items-center gap-4 bg-white/5 hover:bg-white/10 p-3 rounded-xl transition cursor-pointer border border-white/5 group"
-            onclick="openFixGameDetailFromHome(${numericAppId}, ${game.category === 'steam-account'}, '${encodedAccountId}')"
+            onclick="openFixGameDetailFromHome(${numericAppId}, ${isSteamCategory}, '${encodedAccountId}')"
             style="min-width: 200px; width: 200px; height: 300px; position: relative;">
         <img src="${escapeHtml(game.poster || '')}" 
              alt="${escapeHtml(game.title)}"
@@ -268,7 +301,7 @@ function renderPopularGames() {
 }
 
 // Global function to open fix games detail from home with license verification
-window.openFixGameDetailFromHome = async function(appid, isSteamAccount, accountId) {
+window.openFixGameDetailFromHome = async function(appid, isSteamCategory, accountId) {
   try {
     if (window.desktopBridge && typeof window.desktopBridge.getLicenseInfo === 'function') {
       const licenseInfo = await window.desktopBridge.getLicenseInfo();
@@ -287,7 +320,7 @@ window.openFixGameDetailFromHome = async function(appid, isSteamAccount, account
       if (typeof homePageData !== 'undefined' && Array.isArray(homePageData.newFixGames)) {
         gameData = homePageData.newFixGames.find(g => 
           g.appid == appid && 
-          (!isSteamAccount || !accountId || String(g.accountId || g.username || g.appid) === String(accountId))
+          (!isSteamCategory || !accountId || String(g.accountId || g.username || g.appid) === String(accountId))
         );
       }
       
@@ -311,7 +344,8 @@ window.openFixGameDetailFromHome = async function(appid, isSteamAccount, account
   // Jika lolos semua check, navigate
   navigate('fix-games-detail', { 
     appid: appid, 
-    isSteamAccount: isSteamAccount, 
+    source: 'dashboard',
+    isSteamAccount: isSteamCategory, 
     accountId: accountId 
   });
 };

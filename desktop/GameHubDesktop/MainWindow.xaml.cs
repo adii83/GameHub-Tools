@@ -1,5 +1,7 @@
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
@@ -13,6 +15,8 @@ namespace GameHubDesktop
     {
         [DllImport("dwmapi.dll", PreserveSig = true)]
         public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint QueryDosDevice(string? lpDeviceName, StringBuilder lpTargetPath, int ucchMax);
         private string _appRoot = string.Empty;
         private string _baseDir = string.Empty;
         private readonly Services.OnlineFixService _onlineFix = new Services.OnlineFixService();
@@ -20,6 +24,8 @@ namespace GameHubDesktop
         private readonly Services.FixGamesService _fixGames = new Services.FixGamesService();
         private readonly Services.UpdateService _updateService = new Services.UpdateService();
         private bool _logSubscribed = false;
+        private bool _navigationRecoveryInProgress = false;
+        private int _sendToJsErrorDepth = 0;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<int, bool> _appliedCache = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
 
         public MainWindow()
@@ -142,14 +148,18 @@ namespace GameHubDesktop
                 }
 
                 _baseDir = resolvedRoot ?? baseDir;
-                _appRoot = resolvedPublic;
+                _appRoot = NormalizePathForWebView(resolvedPublic);
                 string appRoot = _appRoot;
+
+                _appLog.Append($"Web root resolved: base='{baseDir}', public='{_appRoot}'");
 
                 WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     "app.local", appRoot, CoreWebView2HostResourceAccessKind.Allow);
 
                 // Setup WebMessageReceived handler SEBELUM navigasi
                 WebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                WebView.CoreWebView2.NavigationStarting += OnNavigationStarting;
+                WebView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
                 
                 // Check license sebelum load aplikasi
                 if (!license.IsValid || !license.IsActive)
@@ -255,7 +265,17 @@ namespace GameHubDesktop
                 {
                     if (_logSubscribed)
                     {
-                        try { SendToJs(new { type = "AppLogAppend", line }); } catch { }
+                        try
+                        {
+                            if (System.Windows.Application.Current?.Dispatcher != null)
+                            {
+                                System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                                {
+                                    try { SendToJs(new { type = "AppLogAppend", line }); } catch { }
+                                }));
+                            }
+                        }
+                        catch { }
                     }
                 };
 
@@ -293,6 +313,44 @@ namespace GameHubDesktop
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show("Inisialisasi WebView2 gagal: " + ex.Message, "Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            }
+        }
+
+        private static string NormalizePathForWebView(string path)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) return path;
+                var fullPath = System.IO.Path.GetFullPath(path);
+                if (fullPath.Length < 2 || fullPath[1] != ':') return fullPath;
+
+                var drive = fullPath.Substring(0, 2);
+                var sb = new StringBuilder(1024);
+                var chars = QueryDosDevice(drive, sb, sb.Capacity);
+                if (chars == 0) return fullPath;
+
+                var target = sb.ToString();
+                var nullIndex = target.IndexOf('\0');
+                if (nullIndex >= 0) target = target.Substring(0, nullIndex);
+
+                const string substPrefix = "\\??\\";
+                if (target.StartsWith(substPrefix, StringComparison.Ordinal))
+                {
+                    var targetRoot = target.Substring(substPrefix.Length).TrimEnd('\\');
+                    var relative = fullPath.Substring(2).TrimStart('\\');
+                    if (!string.IsNullOrWhiteSpace(targetRoot))
+                    {
+                        return string.IsNullOrWhiteSpace(relative)
+                            ? targetRoot
+                            : System.IO.Path.Combine(targetRoot, relative);
+                    }
+                }
+
+                return fullPath;
+            }
+            catch
+            {
+                return path;
             }
         }
 
@@ -1595,6 +1653,22 @@ namespace GameHubDesktop
                         });
                         break;
                     }
+                    case "OpenDiscordInvite":
+                    {
+                        var inviteUrl = msg.payload.TryGetProperty("inviteUrl", out var inviteEl)
+                            ? inviteEl.GetString()
+                            : "https://discord.gg/PjYYT6hV";
+
+                        try
+                        {
+                            OpenExternalDiscordInvite(inviteUrl);
+                        }
+                        catch (Exception ex)
+                        {
+                            _appLog.Append($"OpenDiscordInvite error: {ex.Message}");
+                        }
+                        break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -1621,43 +1695,63 @@ namespace GameHubDesktop
 
             if (string.IsNullOrEmpty(json)) return;
 
+            void SafeLogSendToJsError(string message)
+            {
+                if (System.Threading.Interlocked.Increment(ref _sendToJsErrorDepth) != 1)
+                {
+                    System.Threading.Interlocked.Decrement(ref _sendToJsErrorDepth);
+                    try { Console.WriteLine(message); } catch { }
+                    return;
+                }
+
+                try
+                {
+                    _appLog.Append(message);
+                }
+                catch
+                {
+                    try { Console.WriteLine(message); } catch { }
+                }
+                finally
+                {
+                    System.Threading.Interlocked.Decrement(ref _sendToJsErrorDepth);
+                }
+            }
+
             // Pastikan PostWebMessageAsJson selalu dipanggil dari UI thread
             try
             {
-                if (WebView?.CoreWebView2 == null)
+                if (System.Windows.Application.Current?.Dispatcher == null)
                 {
-                    _appLog.Append("[SendToJs] WebView.CoreWebView2 is null, cannot send message to JS.");
+                    try { Console.WriteLine("[SendToJs] Dispatcher unavailable, cannot send message to JS."); } catch { }
                 }
-                else if (System.Windows.Application.Current?.Dispatcher != null)
+                else if (System.Windows.Application.Current.Dispatcher.CheckAccess())
                 {
-                    if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+                    if (WebView?.CoreWebView2 == null)
                     {
-            WebView.CoreWebView2.PostWebMessageAsJson(json);
+                        try { Console.WriteLine("[SendToJs] WebView.CoreWebView2 is null, cannot send message to JS."); } catch { }
                     }
                     else
                     {
-                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                        {
-                            try
-                            {
-                                WebView.CoreWebView2.PostWebMessageAsJson(json);
-                            }
-                            catch (Exception ex)
-                            {
-                                _appLog.Append($"[SendToJs] Dispatcher PostWebMessage error: {ex.Message}");
-                            }
-                        }, System.Windows.Threading.DispatcherPriority.Normal);
+                        WebView.CoreWebView2.PostWebMessageAsJson(json);
                     }
                 }
                 else
                 {
-                    // Fallback: coba kirim langsung (tidak ideal, tapi lebih baik daripada diam)
-                    WebView.CoreWebView2.PostWebMessageAsJson(json);
+                    System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        if (WebView?.CoreWebView2 == null)
+                        {
+                            try { Console.WriteLine("[SendToJs] WebView.CoreWebView2 is null on dispatcher, cannot send message to JS."); } catch { }
+                            return;
+                        }
+                        WebView.CoreWebView2.PostWebMessageAsJson(json);
+                    }, System.Windows.Threading.DispatcherPriority.Normal);
                 }
             }
             catch (Exception ex)
             {
-                _appLog.Append($"[SendToJs] PostWebMessage error: {ex.Message}");
+                SafeLogSendToJsError($"[SendToJs] PostWebMessage error: {ex.Message}");
                 return;
             }
 
@@ -1706,7 +1800,7 @@ namespace GameHubDesktop
             }
             catch (Exception ex)
             {
-                _appLog.Append($"[SendToJs] Error: {ex.Message}");
+                SafeLogSendToJsError($"[SendToJs] Error: {ex.Message}");
             }
         }
 
@@ -1805,6 +1899,103 @@ namespace GameHubDesktop
             catch { }
             _appLog.Append($"DetectGameInstallPath miss appid={appid}");
             return null;
+        }
+
+        private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            try
+            {
+                var uri = e.Uri ?? string.Empty;
+                _appLog.Append($"[WebView] NavigationStarting => {uri}");
+
+                if (string.IsNullOrWhiteSpace(uri))
+                {
+                    return;
+                }
+
+                if (uri.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
+                {
+                    e.Cancel = true;
+                    RecoverWebViewFromBrokenNavigation($"Blocked unexpected file navigation: {uri}");
+                    return;
+                }
+
+                if (uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                    !uri.StartsWith("https://app.local/", StringComparison.OrdinalIgnoreCase))
+                {
+                    _appLog.Append($"[WebView] External top-level navigation detected: {uri}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _appLog.Append($"[WebView] NavigationStarting error: {ex.Message}");
+            }
+        }
+
+        private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            try
+            {
+                var currentSource = WebView?.Source?.ToString() ?? WebView?.CoreWebView2?.Source ?? string.Empty;
+                _appLog.Append($"[WebView] NavigationCompleted => success={e.IsSuccess} status={e.WebErrorStatus} source={currentSource}");
+
+                if (!e.IsSuccess)
+                {
+                    RecoverWebViewFromBrokenNavigation($"Navigation failed: {e.WebErrorStatus} source={currentSource}");
+                    return;
+                }
+
+                if (currentSource.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
+                {
+                    RecoverWebViewFromBrokenNavigation($"Unexpected file source after navigation: {currentSource}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _appLog.Append($"[WebView] NavigationCompleted error: {ex.Message}");
+            }
+        }
+
+        private async void RecoverWebViewFromBrokenNavigation(string reason)
+        {
+            if (_navigationRecoveryInProgress)
+            {
+                _appLog.Append($"[WebView] Recovery skipped (already in progress): {reason}");
+                return;
+            }
+
+            _navigationRecoveryInProgress = true;
+            try
+            {
+                _appLog.Append($"[WebView] Recovering from broken navigation: {reason}");
+                await Dispatcher.InvokeAsync(async () =>
+                {
+                    await Task.Delay(50);
+                    var license = Services.LicenseService.LoadLicense();
+                    var fallbackUrl = (!license.IsValid || !license.IsActive)
+                        ? "https://app.local/activate.html"
+                        : "https://app.local/index.html";
+
+                    _appLog.Append($"[WebView] Redirecting to fallback URL: {fallbackUrl}");
+                    WebView.Source = new Uri(fallbackUrl);
+                });
+            }
+            catch (Exception ex)
+            {
+                _appLog.Append($"[WebView] Recovery error: {ex.Message}");
+            }
+            finally
+            {
+                await Task.Delay(500);
+                _navigationRecoveryInProgress = false;
+            }
+        }
+
+        private void OpenExternalDiscordInvite(string? inviteUrl)
+        {
+            var url = string.IsNullOrWhiteSpace(inviteUrl) ? "https://discord.gg/PjYYT6hV" : inviteUrl.Trim();
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            _appLog.Append($"Discord invite opened via browser: {url}");
         }
 
         private static string? ManualParseInstalldir(string manifestPath)

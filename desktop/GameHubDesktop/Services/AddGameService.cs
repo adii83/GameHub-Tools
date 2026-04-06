@@ -34,6 +34,11 @@ namespace GameHubDesktop.Services
             } catch { return "(path disamarkan)"; }
         }
 
+        private static string GetSourceLabel(int index)
+        {
+            return $"sumber #{index}";
+        }
+
         public static bool IsGameInstalled(string appid)
         {
             try
@@ -217,9 +222,11 @@ namespace GameHubDesktop.Services
                 Directory.CreateDirectory(downloadsRoot);
 
                 // Proses API sesuai urutan di api.json (GameHub akan dipanggil pertama jika enabled)
+                int sourceIndex = 0;
                 foreach (var entry in list.EnumerateArray())
                 {
                     if (cts.IsCancellationRequested) throw new OperationCanceledException();
+                    sourceIndex++;
                     string name = entry.TryGetProperty("name", out var nm) ? nm.GetString() ?? "unknown" : "unknown";
                     string urlTmpl = entry.TryGetProperty("url", out var ut) ? ut.GetString() ?? string.Empty : string.Empty;
                     int successCode = entry.TryGetProperty("success_code", out var sc) && sc.TryGetInt32(out var sci) ? sci : 200;
@@ -227,14 +234,15 @@ namespace GameHubDesktop.Services
                     bool enabled = entry.TryGetProperty("enabled", out var en) && en.ValueKind == JsonValueKind.True;
                     if (!enabled) continue;
 
+                    var sourceLabel = GetSourceLabel(sourceIndex);
                     string url = urlTmpl.Replace("<appid>", appid);
-                    LogInfo($"Coba unduh dari penyedia='{name}' url={RedactUrl(url)}");
+                    LogInfo($"Coba unduh dari {sourceLabel} url={RedactUrl(url)}");
                     try
                     {
                         using var req = new HttpRequestMessage(HttpMethod.Get, url);
                         req.Headers.UserAgent.ParseAdd("luatools-v61-stplugin-hoe");
                         using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-                        LogInfo($"Respon penyedia='{name}' status={(int)resp.StatusCode}");
+                        LogInfo($"Respon {sourceLabel} status={(int)resp.StatusCode}");
                         if ((int)resp.StatusCode == successCode)
                         {
                             string safeName = SafeName(name);
@@ -263,7 +271,7 @@ namespace GameHubDesktop.Services
                                     {
                                         int pct = (int)Math.Clamp(readBytes * 100.0 / totalBytes, 0, 100);
                                         sendToJs(new { type = "AddGameProgress", phase = "download", percent = pct, appid, provider = name });
-                                        if (pct >= lastPct + 10) { lastPct = pct; LogInfo($"Mengunduh {pct}% dari penyedia='{name}'"); }
+                                        if (pct >= lastPct + 10) { lastPct = pct; LogInfo($"Mengunduh {pct}% dari {sourceLabel}"); }
                                     }
                                     else
                                     {
@@ -275,17 +283,17 @@ namespace GameHubDesktop.Services
 
                             downloadedZipPath = outPath;
                             downloadedProviderDir = targetDir;
-                            LogInfo($"Unduhan selesai dari penyedia='{name}' file={RedactPath(downloadedZipPath)}");
+                            LogInfo($"Unduhan selesai dari {sourceLabel} file={RedactPath(downloadedZipPath)}");
                             break;
                             // lanjut ke berikutnya
                         }
                         else
                         {
                             // status lain, lanjut ke berikutnya
-                            if ((int)resp.StatusCode == unavailableCode) LogInfo($"Penyedia '{name}' melaporkan tidak tersedia");
+                            if ((int)resp.StatusCode == unavailableCode) LogInfo($"{sourceLabel} melaporkan tidak tersedia");
                         }
                     }
-                    catch (Exception ex) { LogInfo($"Gagal unduh dari penyedia='{name}': {ex.Message}"); }
+                    catch (Exception ex) { LogInfo($"Gagal unduh dari {sourceLabel}: {ex.Message}"); }
                 }
 
                 if (string.IsNullOrEmpty(downloadedZipPath) || !File.Exists(downloadedZipPath))
